@@ -7,11 +7,15 @@ import (
 	"strconv"
 	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"mio/internal/config"
 	"mio/internal/mcp"
 	"mio/internal/server"
+	"mio/internal/setup"
 	"mio/internal/store"
 	msync "mio/internal/sync"
+	"mio/internal/tui"
 )
 
 const version = "0.1.0"
@@ -52,6 +56,10 @@ func main() {
 		runExport(cfg, args)
 	case "import":
 		runImport(cfg, args)
+	case "tui":
+		runTUI(cfg)
+	case "setup":
+		runSetup(args)
 	case "sync":
 		runSync(cfg, args)
 	case "version":
@@ -71,6 +79,8 @@ func printUsage() {
 Usage: mio <command> [args]
 
 Commands:
+  tui                  Launch interactive terminal UI
+  setup [agent]        Configure Mio as MCP server (default: claude-code)
   mcp                  Start MCP stdio server (for agent integration)
   serve [port]         Start HTTP API server (default: 7438)
   save <title> <content> [--type TYPE] [--project PROJECT]
@@ -102,6 +112,35 @@ func openStore(cfg *config.Config) *store.Store {
 		os.Exit(1)
 	}
 	return s
+}
+
+func runTUI(cfg *config.Config) {
+	s := openStore(cfg)
+	defer s.Close()
+
+	m := tui.New(s)
+	p := tea.NewProgram(m, tea.WithAltScreen())
+	if _, err := p.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "tui error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func runSetup(args []string) {
+	agent := "claude-code"
+	if len(args) > 0 {
+		agent = args[0]
+	}
+	switch agent {
+	case "claude-code":
+		if err := setup.SetupClaudeCode(); err != nil {
+			fmt.Fprintf(os.Stderr, "setup error: %v\n", err)
+			os.Exit(1)
+		}
+	default:
+		fmt.Fprintf(os.Stderr, "unsupported agent: %s (supported: claude-code)\n", agent)
+		os.Exit(1)
+	}
 }
 
 func runMCP(cfg *config.Config) {

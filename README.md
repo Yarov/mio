@@ -4,51 +4,110 @@ Persistent memory system for AI agents. Mio stores, searches, and organizes obse
 
 ## Features
 
+- **Interactive TUI** — browse memories, search, view timelines and sessions from the terminal
+- **Automated setup** — one command to register as MCP server in Claude Code
 - **Full-text search** with FTS5, temporal decay, and importance weighting
 - **Topic-based upserts** — memories with the same `topic_key` update in place instead of duplicating
 - **Automatic deduplication** within a configurable time window (default: 15 min)
 - **Typed relations** between memories: `supersedes`, `relates_to`, `contradicts`, `builds_on`, `caused_by`, `resolved_by`
 - **Session tracking** — group observations by work sessions with summaries
-- **Soft and hard deletes** — preserve data history or remove permanently
 - **Sync** — export/import gzip-compressed chunks for multi-device synchronization
-- **Two interfaces**: MCP (stdio, for agent integration) and HTTP REST API
-- **Search analytics** — hit rate, latency tracking, access frequency
+- **Three interfaces**: TUI, MCP (stdio), and HTTP REST API
+- **Zero CGO** — pure Go, single binary, runs anywhere
 
-## Quick Start
+## Installation
+
+### From source
+
+Requires Go 1.25+.
 
 ```bash
+git clone <repo-url> && cd mio
+
 # Build
 make build
 
 # Install to /usr/local/bin
 make install
 
-# Run MCP server (for Claude Code, Cursor, etc.)
-mio mcp
-
-# Run HTTP API server
-mio serve        # default port 7438
-mio serve 8080   # custom port
-
-# Try the demo
-make demo
+# Verify
+mio version
 ```
 
-## Configuration
+### Configure for Claude Code
 
-| Environment Variable | Default | Description |
-|---|---|---|
-| `MIO_DATA_DIR` | `~/.mio` | Data directory (database + sync chunks) |
+One command registers Mio as an MCP server and adds all tools to the allowlist:
 
-Internal defaults:
+```bash
+mio setup
+```
 
-| Setting | Value |
+This creates:
+- `~/.claude/mcp/mio.json` — MCP server config with absolute binary path
+- Updates `~/.claude/settings.json` — adds 15 tools to `permissions.allow`
+
+Restart Claude Code after running setup. Safe to run multiple times (idempotent).
+
+### Manual MCP configuration
+
+If you prefer to configure manually, add to `~/.claude/mcp/mio.json`:
+
+```json
+{
+  "mcpServers": {
+    "mio": {
+      "command": "/usr/local/bin/mio",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+## Quick Start
+
+```bash
+# Install and setup
+make install
+mio setup
+
+# Launch the TUI to explore memories
+mio tui
+
+# Or use the CLI directly
+mio save "Fixed auth bug" "What: JWT token not refreshing\nWhy: Race condition in middleware\nWhere: internal/auth/middleware.go\nLearned: Always use mutex for shared token state" --type bugfix --project api
+
+mio search "authentication"
+mio stats
+```
+
+## TUI
+
+Launch with `mio tui` or `make run-tui`.
+
+### Screens
+
+| Screen | Description |
 |---|---|
-| Database | `~/.mio/mio.db` (SQLite, WAL mode) |
-| HTTP port | `7438` |
-| Max observation length | 50,000 characters |
-| Max search/context results | 20 |
-| Deduplication window | 15 minutes |
+| **Dashboard** | Memory stats, top projects, navigation menu |
+| **Search** | Full-text search with scored results |
+| **Recent** | Latest 50 memories with preview |
+| **Observation Detail** | Full content, metadata, relations |
+| **Timeline** | Chronological context around a memory |
+| **Sessions** | Work sessions with observation counts |
+| **Session Detail** | Session metadata and summary |
+
+### Navigation
+
+| Key | Action |
+|---|---|
+| `1` / `s` / `/` | Search |
+| `2` / `r` | Recent memories |
+| `3` / `e` | Sessions |
+| `j` / `k` or arrows | Move cursor / scroll |
+| `Enter` | Select / drill into |
+| `t` | View timeline (from detail view) |
+| `Esc` / `Backspace` | Go back |
+| `q` | Quit (from dashboard) |
 
 ## CLI Usage
 
@@ -59,6 +118,10 @@ mio <command> [args]
 ### Commands
 
 ```bash
+# Interactive
+mio tui                     # Launch terminal UI
+mio setup [agent]           # Configure as MCP server (default: claude-code)
+
 # Memory management
 mio save <title> <content> [--type TYPE] [--project PROJECT]
 mio search <query> [--project PROJECT] [--type TYPE] [--limit N]
@@ -77,7 +140,7 @@ mio sync --status           # Show sync state
 
 # Server modes
 mio mcp                     # MCP stdio server
-mio serve [port]            # HTTP API server
+mio serve [port]            # HTTP API server (default: 7438)
 
 # Info
 mio version
@@ -101,12 +164,25 @@ mio context --project payments --limit 10
 # View timeline around a specific memory
 mio timeline 42 --before 3 --after 3
 
-# Export all data to a file
+# Export all data
 mio export backup.json
-
-# Export only one project
-mio export --project payments payments-backup.json
 ```
+
+## Configuration
+
+| Environment Variable | Default | Description |
+|---|---|---|
+| `MIO_DATA_DIR` | `~/.mio` | Data directory (database + sync chunks) |
+
+Internal defaults:
+
+| Setting | Value |
+|---|---|
+| Database | `~/.mio/mio.db` (SQLite, WAL mode) |
+| HTTP port | `7438` |
+| Max observation length | 50,000 characters |
+| Max search/context results | 20 |
+| Deduplication window | 15 minutes |
 
 ## Observation Types
 
@@ -122,7 +198,7 @@ mio export --project payments payments-backup.json
 | `learning` | Corrections and teachings |
 | `summary` | Session or topic summaries |
 
-## Content Structure
+### Content Structure
 
 Observations follow a structured format for consistency:
 
@@ -133,28 +209,11 @@ Where: [files/modules affected]
 Learned: [key takeaway]
 ```
 
-## MCP Server Integration
+## MCP Tools
 
-Mio implements the [Model Context Protocol](https://modelcontextprotocol.io/) for direct integration with AI agents.
+15 tools available when running as MCP server:
 
-### Claude Code
-
-Add to `~/.claude/settings.json`:
-
-```json
-{
-  "mcpServers": {
-    "mio": {
-      "command": "mio",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
-### Available MCP Tools
-
-#### Memory Management
+### Memory Management
 
 | Tool | Description |
 |---|---|
@@ -163,7 +222,7 @@ Add to `~/.claude/settings.json`:
 | `mem_delete` | Soft or hard delete a memory |
 | `mem_get_observation` | Get full content of a memory by ID |
 
-#### Search & Retrieval
+### Search & Retrieval
 
 | Tool | Description |
 |---|---|
@@ -171,7 +230,7 @@ Add to `~/.claude/settings.json`:
 | `mem_context` | Get recent observations, optionally filtered by project |
 | `mem_timeline` | Chronological view around a specific observation |
 
-#### Sessions
+### Sessions
 
 | Tool | Description |
 |---|---|
@@ -179,14 +238,14 @@ Add to `~/.claude/settings.json`:
 | `mem_session_end` | End a session with optional summary |
 | `mem_session_summary` | List recent sessions with observation counts |
 
-#### Relations
+### Relations
 
 | Tool | Description |
 |---|---|
 | `mem_relate` | Create a typed relation between two memories |
 | `mem_relations` | Get all related observations for a memory |
 
-#### Utilities
+### Utilities
 
 | Tool | Description |
 |---|---|
@@ -194,44 +253,17 @@ Add to `~/.claude/settings.json`:
 | `mem_suggest_topic_key` | Generate a stable topic key from title and content |
 | `mem_stats` | System statistics: totals, hit rate, latency, top projects |
 
-### Tool Parameters
+### Key Parameters
 
-#### `mem_save`
+**`mem_save`**: `title` (required), `type` (required), `content` (required), `session_id`, `project`, `scope` (project/personal/global), `topic_key`, `importance` (0.0-1.0)
 
-| Parameter | Required | Description |
-|---|---|---|
-| `title` | yes | Brief title (action verb + what) |
-| `type` | yes | One of the observation types |
-| `content` | yes | Structured content (What/Why/Where/Learned) |
-| `session_id` | no | Current session ID |
-| `project` | no | Project name |
-| `scope` | no | `project` (default), `personal`, or `global` |
-| `topic_key` | no | Stable key for evolving topics (enables upsert) |
-| `importance` | no | 0.0 to 1.0 (default: 0.5) |
+**`mem_search`**: `query` (required), `project`, `type`, `limit`
 
-#### `mem_search`
-
-| Parameter | Required | Description |
-|---|---|---|
-| `query` | yes | Search query (full-text) |
-| `project` | no | Filter by project |
-| `type` | no | Filter by observation type |
-| `limit` | no | Max results (default: 20) |
-
-#### `mem_relate`
-
-| Parameter | Required | Description |
-|---|---|---|
-| `from_id` | yes | Source observation ID |
-| `to_id` | yes | Target observation ID |
-| `type` | yes | `supersedes`, `relates_to`, `contradicts`, `builds_on`, `caused_by`, `resolved_by` |
-| `strength` | no | 0.0 to 1.0 (default: 1.0) |
+**`mem_relate`**: `from_id` (required), `to_id` (required), `type` (required: supersedes/relates_to/contradicts/builds_on/caused_by/resolved_by), `strength` (0.0-1.0)
 
 ## HTTP API
 
 Start with `mio serve [port]` (default: 7438).
-
-### Endpoints
 
 | Method | Path | Description |
 |---|---|---|
@@ -268,25 +300,22 @@ curl -X POST http://localhost:7438/observations \
 # Search
 curl "http://localhost:7438/search?q=cache+race+condition&project=api"
 
-# Get recent context
-curl "http://localhost:7438/context?project=api&limit=5"
-
 # Get stats
 curl http://localhost:7438/stats
 ```
 
 ## Search Scoring
 
-Search results are ranked using a composite score:
+Results are ranked using a composite score:
 
 1. **FTS5 relevance** — base text match score
-2. **Temporal decay** — exponential decay with half-life of ~69 days (`e^(-0.01 * age_in_days)`)
+2. **Temporal decay** — exponential decay with half-life of ~69 days
 3. **Importance boost** — `score *= (0.7 + 0.3 * importance)`
 4. **Access frequency** — logarithmic boost: `score *= log2(access_count + 2)`
 
 ## Topic Keys
 
-For evolving topics (e.g., "auth system design", "deploy pipeline"), use `topic_key` to keep a single living memory that updates in place:
+For evolving topics, use `topic_key` to keep a single living memory that updates in place:
 
 ```bash
 # First save creates the memory
@@ -296,53 +325,34 @@ mio save "Auth system design" "Current: JWT with RS256" --type architecture --to
 mio save "Auth system design" "Current: JWT with RS256 + refresh tokens" --type architecture --topic-key auth-system
 ```
 
-Use `mem_suggest_topic_key` to generate consistent keys from titles.
-
 ## Sync
 
-Mio supports chunk-based synchronization for multi-device setups. Chunks are gzip-compressed JSONL files stored in `~/.mio/chunks/`.
+Chunk-based synchronization for multi-device setups. Chunks are gzip-compressed JSONL files stored in `~/.mio/chunks/`.
 
 ```bash
-# Export new data since last sync
-mio sync
-
-# Import pending chunks (from other devices)
-mio sync --import
-
-# Check sync status
-mio sync --status
+mio sync              # Export new data since last sync
+mio sync --import     # Import pending chunks
+mio sync --status     # Check sync status
 ```
-
-A manifest file (`~/.mio/chunks/manifest.json`) tracks which chunks have been processed to avoid duplicates.
-
-## Database Schema
-
-SQLite with WAL mode for concurrent reads. Single-writer pattern.
-
-### Tables
-
-- **sessions** — work sessions with project, directory, timestamps, summary
-- **observations** — primary memory units with 20+ fields including type, scope, importance, sync_id, topic_key, normalized_hash
-- **user_prompts** — archived user prompts linked to sessions
-- **relations** — typed links between observations with strength (cascading deletes)
-- **search_log** — search analytics (query, result count, latency)
-
-### Indexes
-
-Observations are indexed on: session_id, type, project, created_at, scope, sync_id, topic_key, deleted_at, normalized_hash, importance. Relations are indexed on both from_id and to_id.
 
 ## Architecture
 
 ```
-cmd/mio/main.go          CLI entrypoint and command routing
+cmd/mio/main.go            CLI entrypoint and command routing
 internal/
-  config/config.go        Configuration with defaults and env overrides
-  store/store.go          SQLite store: CRUD, search, metrics, import/export
-  mcp/mcp.go              MCP stdio server with 15 tools
-  server/server.go        HTTP REST API server
+  config/config.go          Configuration with defaults and env overrides
+  store/store.go            SQLite store: CRUD, search, metrics, import/export
+  mcp/mcp.go                MCP stdio server with 15 tools
+  server/server.go          HTTP REST API server
+  tui/
+    model.go                TUI state, screens, async commands
+    update.go               Input handling and navigation
+    view.go                 Screen rendering (dashboard, search, detail, timeline)
+    styles.go               Color palette and lipgloss styles
+  setup/setup.go            Automated MCP registration for Claude Code
   sync/
-    sync.go               Chunk-based sync logic with manifest tracking
-    transport.go           File transport (gzip-compressed JSONL)
+    sync.go                 Chunk-based sync logic with manifest tracking
+    transport.go            File transport (gzip-compressed JSONL)
 ```
 
 ## Dependencies
@@ -352,14 +362,18 @@ internal/
 | `modernc.org/sqlite` | Pure-Go SQLite driver (no CGO) |
 | `github.com/mark3labs/mcp-go` | MCP protocol implementation |
 | `github.com/google/uuid` | UUID generation for sync_id |
+| `github.com/charmbracelet/bubbletea` | TUI framework (Elm architecture) |
+| `github.com/charmbracelet/bubbles` | TUI components (text input) |
+| `github.com/charmbracelet/lipgloss` | Terminal styling and layout |
 
 ## Development
 
 ```bash
 make build       # Compile to ./bin/mio
-make test        # Run tests
+make test        # Run tests (70 tests)
 make clean       # Remove binary and database
 make demo        # Run demo with sample data
+make run-tui     # Build and launch TUI
 make run-mcp     # Build and run MCP server
 make run-serve   # Build and run HTTP server
 make install     # Copy to /usr/local/bin

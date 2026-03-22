@@ -1,16 +1,23 @@
-.PHONY: build run-mcp run-serve test clean install
+.PHONY: build run-mcp run-serve run-tui test clean install
 
 BINARY=mio
 BUILD_DIR=./bin
+UNAME_S := $(shell uname -s)
 
 build:
 	go build -o $(BUILD_DIR)/$(BINARY) ./cmd/mio
+ifeq ($(UNAME_S),Darwin)
+	-codesign -f -s - $(BUILD_DIR)/$(BINARY) 2>/dev/null
+endif
 
 run-mcp: build
 	$(BUILD_DIR)/$(BINARY) mcp
 
 run-serve: build
 	$(BUILD_DIR)/$(BINARY) serve
+
+run-tui: build
+	$(BUILD_DIR)/$(BINARY) tui
 
 test:
 	go test ./...
@@ -21,6 +28,9 @@ clean:
 
 install: build
 	cp $(BUILD_DIR)/$(BINARY) /usr/local/bin/$(BINARY)
+ifeq ($(UNAME_S),Darwin)
+	-codesign -f -s - /usr/local/bin/$(BINARY) 2>/dev/null
+endif
 
 # Quick test: save and search
 demo: build
