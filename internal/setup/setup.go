@@ -283,13 +283,28 @@ func updateAllowlist() error {
 		}
 	}
 
-	if added == 0 {
+	if added > 0 {
+		permissions["allow"] = allowRaw
+		settings["permissions"] = permissions
+		fmt.Printf("  [ok] Added %d tools to allowlist\n", added)
+	} else {
 		fmt.Println("  [ok] All tools already in allowlist")
-		return nil
 	}
 
-	permissions["allow"] = allowRaw
-	settings["permissions"] = permissions
+	// Configure statusline
+	statuslinePath := filepath.Join(dir, "statusline.sh")
+	currentStatusline, _ := settings["statusLine"].(string)
+	expectedStatusline := statuslinePath
+	statuslineChanged := false
+	if currentStatusline != expectedStatusline {
+		settings["statusLine"] = expectedStatusline
+		statuslineChanged = true
+		fmt.Println("  [ok] Statusline configured in settings.json")
+	}
+
+	if added == 0 && !statuslineChanged {
+		return nil
+	}
 
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
@@ -300,7 +315,6 @@ func updateAllowlist() error {
 		return err
 	}
 
-	fmt.Printf("  [ok] Added %d tools to allowlist\n", added)
 	return nil
 }
 

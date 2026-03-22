@@ -1,97 +1,102 @@
 #!/usr/bin/env bash
 # Mio statusline for Claude Code
-# Shows: model | directory | git branch | lines +/- | context usage | mio memories
+# Receives JSON via stdin with model, workspace, cost, context_window data
 
-# Colors
 CYAN='\033[0;36m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 RED='\033[0;31m'
 DIM='\033[2m'
-RESET='\033[0m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+# Read JSON from stdin
+input=$(cat)
 
 parts=()
 
-# Model name
-if [ -n "$CLAUDE_MODEL" ]; then
-  model=$(echo "$CLAUDE_MODEL" | sed 's/claude-//' | cut -c1-12)
-  parts+=("${CYAN}${model}${RESET}")
+# Model
+MODEL=$(echo "$input" | jq -r '.model.display_name // "Claude"' 2>/dev/null)
+if [ -n "$MODEL" ]; then
+  parts+=("${BOLD}${CYAN}${MODEL}${NC}")
 fi
 
-# Current directory (short)
-dir=$(basename "$PWD")
-parts+=("${DIM}${dir}${RESET}")
+# Directory
+DIR=$(echo "$input" | jq -r '.workspace.current_dir // ""' 2>/dev/null)
+if [ -n "$DIR" ]; then
+  DIR_NAME=$(basename "$DIR")
+  parts+=("${DIM}${DIR_NAME}${NC}")
+fi
 
 # Git branch
 if git rev-parse --git-dir &>/dev/null 2>&1; then
   branch=$(git branch --show-current 2>/dev/null)
   if [ -n "$branch" ]; then
-    # Changed files count
-    changed=$(git diff --shortstat 2>/dev/null | grep -oP '\d+ file' | grep -oP '\d+' || echo "0")
-    additions=$(git diff --numstat 2>/dev/null | awk '{s+=$1} END {print s+0}')
-    deletions=$(git diff --numstat 2>/dev/null | awk '{s+=$2} END {print s+0}')
-
-    git_info="${GREEN}${branch}${RESET}"
-    if [ "$additions" -gt 0 ] || [ "$deletions" -gt 0 ]; then
-      git_info="${git_info} ${GREEN}+${additions}${RESET}${RED}-${deletions}${RESET}"
+    dirty=""
+    if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+      dirty="*"
     fi
-    parts+=("$git_info")
+    parts+=("${GREEN}${branch}${dirty}${NC}")
   fi
 fi
 
-# Context window usage
-if [ -n "$CLAUDE_CONTEXT_WINDOW" ] && [ -n "$CLAUDE_CONTEXT_TOKENS_USED" ]; then
-  pct=$((CLAUDE_CONTEXT_TOKENS_USED * 100 / CLAUDE_CONTEXT_WINDOW))
-  bar_len=10
-  filled=$((pct * bar_len / 100))
-  empty=$((bar_len - filled))
-
-  bar=""
-  for ((i=0; i<filled; i++)); do bar+="█"; done
-  for ((i=0; i<empty; i++)); do bar+="░"; done
-
-  color=$GREEN
-  if [ "$pct" -gt 75 ]; then color=$RED
-  elif [ "$pct" -gt 50 ]; then color=$YELLOW
-  fi
-
-  parts+=("${color}${bar} ${pct}%${RESET}")
+# Lines added/removed
+ADDED=$(echo "$input" | jq -r '.cost.total_lines_added // 0' 2>/dev/null)
+REMOVED=$(echo "$input" | jq -r '.cost.total_lines_removed // 0' 2>/dev/null)
+if [ "$ADDED" -gt 0 ] 2>/dev/null || [ "$REMOVED" -gt 0 ] 2>/dev/null; then
+  parts+=("${GREEN}+${ADDED}${NC} ${RED}-${REMOVED}${NC}")
 fi
 
-# Mio memory count (cached for 60s)
+# Context window
+CTX_SIZE=$(echo "$input" | jq -r '.context_window.context_window_size // 0' 2>/dev/null)
+INPUT_TOKENS=$(echo "$input" | jq -r '.context_window.current_usage.input_tokens // 0' 2>/dev/null)
+CACHE_CREATE=$(echo "$input" | jq -r '.context_window.current_usage.cache_creation_input_tokens // 0' 2>/dev/null)
+CACHE_READ=$(echo "$input" | jq -r '.context_window.current_usage.cache_read_input_tokens // 0' 2>/dev/null)
+
+if [ "$CTX_SIZE" -gt 0 ] 2>/dev/null; then
+  TOTAL_USED=$((INPUT_TOKENS + CACHE_CREATE + CACHE_READ))
+  CTX_PCT=$((TOTAL_USED * 100 / CTX_SIZE))
+  [ "$CTX_PCT" -gt 100 ] && CTX_PCT=100
+
+  BAR_W=8
+  FILLED=$((CTX_PCT * BAR_W / 100))
+  EMPTY=$((BAR_W - FILLED))
+
+  BAR_COLOR=$GREEN
+  [ "$CTX_PCT" -ge 50 ] && BAR_COLOR=$YELLOW
+  [ "$CTX_PCT" -ge 80 ] && BAR_COLOR=$RED
+
+  BAR="${BAR_COLOR}["
+  for ((i=0; i<FILLED; i++)); do BAR+="="; done
+  for ((i=0; i<EMPTY; i++)); do BAR+="."; done
+  BAR+="]${NC}"
+
+  parts+=("${BAR} ${DIM}${CTX_PCT}%${NC}")
+fi
+
+# Mio memory count (cached 60s)
 MIO_CACHE="/tmp/mio-statusline-cache"
-MIO_CACHE_TTL=60
-
-refresh_mio=true
+refresh=true
 if [ -f "$MIO_CACHE" ]; then
-  cache_age=$(( $(date +%s) - $(stat -f%m "$MIO_CACHE" 2>/dev/null || stat -c%Y "$MIO_CACHE" 2>/dev/null || echo 0) ))
-  if [ "$cache_age" -lt "$MIO_CACHE_TTL" ]; then
-    refresh_mio=false
-  fi
+  age=$(( $(date +%s) - $(stat -f%m "$MIO_CACHE" 2>/dev/null || stat -c%Y "$MIO_CACHE" 2>/dev/null || echo 0) ))
+  [ "$age" -lt 60 ] && refresh=false
 fi
 
-if $refresh_mio; then
-  if command -v mio &>/dev/null; then
-    count=$(mio stats 2>/dev/null | grep -o '"TotalObservations":[0-9]*' | grep -o '[0-9]*' || echo "0")
-    echo "$count" > "$MIO_CACHE"
-  else
-    echo "?" > "$MIO_CACHE"
-  fi
+if $refresh; then
+  count=$(mio stats 2>/dev/null | jq -r '.TotalObservations // 0' 2>/dev/null || echo "0")
+  echo "$count" > "$MIO_CACHE"
 fi
 
-mio_count=$(cat "$MIO_CACHE" 2>/dev/null || echo "?")
-if [ "$mio_count" != "?" ] && [ "$mio_count" -gt 0 ] 2>/dev/null; then
-  parts+=("${YELLOW}mio:${mio_count}${RESET}")
+mio_count=$(cat "$MIO_CACHE" 2>/dev/null || echo "0")
+if [ "$mio_count" -gt 0 ] 2>/dev/null; then
+  parts+=("${YELLOW}mio:${mio_count}${NC}")
 fi
 
-# Join with separator
-IFS='|'
+# Join
 output=""
 for i in "${!parts[@]}"; do
-  if [ "$i" -gt 0 ]; then
-    output+=" ${DIM}│${RESET} "
-  fi
+  [ "$i" -gt 0 ] && output+=" ${DIM}│${NC} "
   output+="${parts[$i]}"
 done
 
-echo -e "$output"
+echo -e "${output}\033[K"
