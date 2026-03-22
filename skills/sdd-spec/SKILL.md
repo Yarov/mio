@@ -5,18 +5,22 @@ description: >
   Trigger: When writing or updating specs for a change.
 metadata:
   author: mio
-  version: "1.0"
+  version: "2.0"
 ---
 
 ## Purpose
 
 Take the proposal and produce delta specs — structured requirements and scenarios describing what's being ADDED, MODIFIED, or REMOVED.
 
-> Read `skills/_shared/conventions.md` for persistence and naming rules.
+## Persistence & Naming
+
+All SDD artifacts use deterministic naming: `title` and `topic_key` = `sdd/{change-name}/{artifact-type}`, `type` = `architecture`, `project` = detected project name. `topic_key` enables upserts (save again → update, not duplicate).
+
+**Two-step retrieval** (CRITICAL): `mcp__mio__mem_search` returns truncated previews. Always: (1) search → get ID, (2) `mcp__mio__mem_get_observation(id)` → full content. Never use search previews as source material.
 
 ## Steps
 
-### 1. Load Skill Registry & Dependencies
+### 1. Load Dependencies
 
 ```
 mcp__mio__mem_search(query: "sdd/{change-name}/proposal", project: "{project}") → get ID
@@ -91,17 +95,14 @@ mcp__mio__mem_save(
 )
 ```
 
-### 5. Return Summary
+### 5. Return
 
 ```markdown
-## Specs Created
-**Change**: {change-name}
-
-| Domain | Type | Requirements | Scenarios |
-|--------|------|-------------|-----------|
-| {domain} | Delta/New | {N added, M modified} | {total} |
-
-**Next**: Ready for sdd-design.
+**Status**: success
+**Summary**: Specs created for {change-name}. {N} requirements, {M} scenarios.
+**Artifacts**: sdd/{change-name}/spec
+**Next**: sdd-design (or sdd-tasks if design already exists)
+**Risks**: {risks or "None"}
 ```
 
 ## Rules
@@ -111,3 +112,4 @@ mcp__mio__mem_save(
 - Every requirement MUST have at least ONE scenario
 - Include happy path AND edge cases
 - Specs describe WHAT, not HOW — no implementation details
+- Artifact budget: **650 words max**

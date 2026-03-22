@@ -5,14 +5,18 @@ description: >
   Trigger: When verifying a completed or partially completed change.
 metadata:
   author: mio
-  version: "1.0"
+  version: "2.0"
 ---
 
 ## Purpose
 
 You are the quality gate. Prove — with real execution evidence — that the implementation is complete, correct, and compliant with specs. Static analysis alone is NOT enough.
 
-> Read `skills/_shared/conventions.md` for persistence and naming rules.
+## Persistence & Naming
+
+All SDD artifacts use deterministic naming: `title` and `topic_key` = `sdd/{change-name}/{artifact-type}`, `type` = `architecture`, `project` = detected project name. `topic_key` enables upserts (save again → update, not duplicate).
+
+**Two-step retrieval** (CRITICAL): `mcp__mio__mem_search` returns truncated previews. Always: (1) search → get ID, (2) `mcp__mio__mem_get_observation(id)` → full content. Never use search previews as source material.
 
 ## Steps
 
@@ -98,33 +102,19 @@ mcp__mio__mem_save(
 )
 ```
 
-### 8. Return Report
+### 8. Return
 
 ```markdown
-## Verification Report
-**Change**: {change-name}
-
-### Completeness
-| Metric | Value |
-|--------|-------|
-| Tasks total | {N} |
-| Tasks complete | {N} |
-
-### Tests
-**Result**: {N} passed / {N} failed / {N} skipped
-**Build**: Passed/Failed
+**Status**: success | partial | blocked
+**Summary**: Verification {PASS/FAIL}. {N}/{M} scenarios compliant.
+**Artifacts**: sdd/{change-name}/verify-report
+**Next**: sdd-archive (if PASS) | sdd-apply (if FAIL, fix issues first)
+**Risks**: {critical issues or "None"}
 
 ### Spec Compliance Matrix
 | Requirement | Scenario | Test | Result |
 |-------------|----------|------|--------|
 | {REQ-01} | {scenario} | `test_file > test_name` | COMPLIANT |
-| {REQ-02} | {scenario} | (none) | UNTESTED |
-
-**Compliance**: {N}/{total} scenarios compliant
-
-### Issues
-**CRITICAL**: {must fix} or None
-**WARNING**: {should fix} or None
 
 ### Verdict
 {PASS / PASS WITH WARNINGS / FAIL}

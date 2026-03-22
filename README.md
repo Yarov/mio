@@ -4,7 +4,10 @@ Persistent memory system for AI agents. Mio stores, searches, and organizes obse
 
 ## Features
 
+- **Web Dashboard** — visual admin panel with stats, architecture diagram, SDD pipeline, skill editor, and memory browser at `http://localhost:7438/`
 - **Interactive TUI** — browse memories, search, view timelines and sessions from the terminal
+- **SDD Pipeline v2.0** — Spec-Driven Development orchestrator with 11 skills, parallel phases, and cross-session recovery
+- **Skill Editor** — edit skills from the web dashboard with markdown preview (split view, line numbers, live render)
 - **Automated setup** — one command to register as MCP server in Claude Code
 - **Full-text search** with FTS5, temporal decay, and importance weighting
 - **Topic-based upserts** — memories with the same `topic_key` update in place instead of duplicating
@@ -12,7 +15,7 @@ Persistent memory system for AI agents. Mio stores, searches, and organizes obse
 - **Typed relations** between memories: `supersedes`, `relates_to`, `contradicts`, `builds_on`, `caused_by`, `resolved_by`
 - **Session tracking** — group observations by work sessions with summaries
 - **Sync** — export/import gzip-compressed chunks for multi-device synchronization
-- **Three interfaces**: TUI, MCP (stdio), and HTTP REST API
+- **Four interfaces**: Web Dashboard, TUI, MCP (stdio), and HTTP REST API
 - **Zero CGO** — pure Go, single binary, runs anywhere
 
 ## Installation
@@ -27,8 +30,9 @@ git clone <repo-url> && cd mio
 # Build
 make build
 
-# Install to /usr/local/bin
+# Install to /usr/local/bin (or custom prefix)
 make install
+# Or: make install PREFIX=~/.local
 
 # Verify
 mio version
@@ -36,31 +40,33 @@ mio version
 
 ### Configure for Claude Code
 
-One command registers Mio as an MCP server and adds all tools to the allowlist:
+One command registers Mio as an MCP server, installs skills, memory protocol, and statusline:
 
 ```bash
 mio setup
 ```
 
 This creates:
-- `~/.claude/mcp/mio.json` — MCP server config with absolute binary path
-- Updates `~/.claude/settings.json` — adds 15 tools to `permissions.allow`
+- `~/.claude/mcp/mio.json` — MCP server registration
+- `~/.claude/settings.json` — 15 tools added to permissions + statusline config
+- `~/.claude/CLAUDE.md` — Memory protocol instructions (proactive save, search, session management)
+- `~/.claude/skills/` — All SDD and coding skills (28 skills)
+- `~/.claude/statusline.sh` — Status bar integration
+- `~/.claude/output-styles/mio.md` — Output style
 
 Restart Claude Code after running setup. Safe to run multiple times (idempotent).
 
-### Manual MCP configuration
+### Uninstall
 
-If you prefer to configure manually, add to `~/.claude/mcp/mio.json`:
+```bash
+# Remove Claude Code integration (keeps data)
+mio uninstall
 
-```json
-{
-  "mcpServers": {
-    "mio": {
-      "command": "/usr/local/bin/mio",
-      "args": ["mcp"]
-    }
-  }
-}
+# Remove everything including data
+mio uninstall --purge
+
+# Remove binary
+make uninstall
 ```
 
 ## Quick Start
@@ -70,15 +76,76 @@ If you prefer to configure manually, add to `~/.claude/mcp/mio.json`:
 make install
 mio setup
 
-# Launch the TUI to explore memories
+# Launch the web dashboard
+mio serve
+# Open http://localhost:7438/
+
+# Launch the TUI
 mio tui
 
 # Or use the CLI directly
-mio save "Fixed auth bug" "What: JWT token not refreshing\nWhy: Race condition in middleware\nWhere: internal/auth/middleware.go\nLearned: Always use mutex for shared token state" --type bugfix --project api
+mio save "Fixed auth bug" "What: JWT token not refreshing\nWhy: Race condition\nWhere: internal/auth/middleware.go\nLearned: Always use mutex for shared token state" --type bugfix --project api
 
 mio search "authentication"
 mio stats
 ```
+
+## Web Dashboard
+
+Launch with `mio serve [port]` (default: 7438), then open `http://localhost:7438/`.
+
+### Pages
+
+| Page | Description |
+|---|---|
+| **Dashboard** | Stats cards, feature overview, recent memories + sessions |
+| **Architecture** | Visual diagram of Mio's components (interfaces → store → data layer), setup file map |
+| **Pipeline** | Interactive SDD flow — click phases for details (word budgets, dependencies, artifacts) |
+| **Skills** | All installed skills with category filters + inline editor with markdown preview |
+| **Memories** | Full-text search + browse all memories with detail modal |
+| **Admin** | Reinstall/update, export data, API reference, CLI reference |
+
+### Skill Editor
+
+The Skills page includes a full editor with 3 modes:
+- **Preview** — rendered markdown with syntax-highlighted code blocks
+- **Edit** — code editor with line numbers and tab support
+- **Split** — side-by-side editor + live preview
+
+Edit any skill's SKILL.md directly from the browser and save.
+
+## SDD Pipeline (Spec-Driven Development) v2.0
+
+The Mio Architect orchestrates a full development pipeline inspired by [agent-teams-lite](https://github.com/Gentleman-Programming/agent-teams-lite).
+
+```
+init → explore → propose → spec + design (parallel) → tasks → apply → verify → archive
+```
+
+### Key Principles
+
+- **Delegated execution** — each phase runs as a sub-agent with fresh context via the Agent tool
+- **The orchestrator never codes** — it delegates, tracks state, and asks for user approval
+- **Word budgets** — proposal: 400w, spec: 650w, design: 800w, tasks: 530w (prevents context pollution)
+- **Cross-session recovery** — all artifacts saved to Mio memory, recoverable with `/sdd-continue`
+
+### Shortcuts
+
+| Command | Description |
+|---|---|
+| `/mio-architect {desc}` | Full pipeline with approval at each gate (large changes) |
+| `/sdd-ff {desc}` | Fast-forward through planning phases, stop before implementation (medium changes) |
+| `/sdd-continue` | Auto-detect pipeline state and execute next phase |
+
+### Skills (28 total)
+
+| Category | Skills |
+|---|---|
+| **SDD Pipeline** (11) | sdd-init, sdd-explore, sdd-propose, sdd-spec, sdd-design, sdd-tasks, sdd-apply, sdd-verify, sdd-archive, sdd-continue, sdd-ff |
+| **Orchestrator** (1) | mio-architect |
+| **Coding** (11) | react-19, nextjs-15, typescript, tailwind-4, zod-4, zustand-5, ai-sdk-5, django-drf, pytest, playwright, github-pr |
+| **Engineering** (3) | pr-review, technical-review, skill-creator |
+| **Meta** (2) | skill-registry, find-skills |
 
 ## TUI
 
@@ -121,6 +188,7 @@ mio <command> [args]
 # Interactive
 mio tui                     # Launch terminal UI
 mio setup [agent]           # Configure as MCP server (default: claude-code)
+mio uninstall [--purge]     # Remove Mio from Claude Code
 
 # Memory management
 mio save <title> <content> [--type TYPE] [--project PROJECT]
@@ -140,32 +208,11 @@ mio sync --status           # Show sync state
 
 # Server modes
 mio mcp                     # MCP stdio server
-mio serve [port]            # HTTP API server (default: 7438)
+mio serve [port]            # HTTP dashboard + API server (default: 7438)
 
 # Info
 mio version
 mio help
-```
-
-### Examples
-
-```bash
-# Save a decision
-mio save "Chose PostgreSQL over MySQL" \
-  "What: Selected PostgreSQL for the payments service\nWhy: Better JSON support and row-level locking\nWhere: services/payments\nLearned: JSONB indexes are 3x faster for our query patterns" \
-  --type decision --project payments
-
-# Search memories
-mio search "authentication JWT" --project api --limit 5
-
-# Get recent context for a project
-mio context --project payments --limit 10
-
-# View timeline around a specific memory
-mio timeline 42 --before 3 --after 3
-
-# Export all data
-mio export backup.json
 ```
 
 ## Configuration
@@ -197,17 +244,6 @@ Internal defaults:
 | `preference` | User preferences and settings |
 | `learning` | Corrections and teachings |
 | `summary` | Session or topic summaries |
-
-### Content Structure
-
-Observations follow a structured format for consistency:
-
-```
-What: [what was done]
-Why: [motivation/context]
-Where: [files/modules affected]
-Learned: [key takeaway]
-```
 
 ## MCP Tools
 
@@ -253,20 +289,13 @@ Learned: [key takeaway]
 | `mem_suggest_topic_key` | Generate a stable topic key from title and content |
 | `mem_stats` | System statistics: totals, hit rate, latency, top projects |
 
-### Key Parameters
-
-**`mem_save`**: `title` (required), `type` (required), `content` (required), `session_id`, `project`, `scope` (project/personal/global), `topic_key`, `importance` (0.0-1.0)
-
-**`mem_search`**: `query` (required), `project`, `type`, `limit`
-
-**`mem_relate`**: `from_id` (required), `to_id` (required), `type` (required: supersedes/relates_to/contradicts/builds_on/caused_by/resolved_by), `strength` (0.0-1.0)
-
 ## HTTP API
 
-Start with `mio serve [port]` (default: 7438).
+Start with `mio serve [port]` (default: 7438). Dashboard at `GET /`.
 
 | Method | Path | Description |
 |---|---|---|
+| `GET` | `/` | Web dashboard |
 | `GET` | `/health` | Health check |
 | `POST` | `/observations` | Save observation |
 | `GET` | `/observations/{id}` | Get observation by ID |
@@ -282,77 +311,36 @@ Start with `mio serve [port]` (default: 7438).
 | `GET` | `/stats` | System metrics |
 | `GET` | `/export?project=X` | Export data as JSON |
 | `POST` | `/import` | Import JSON data (50MB limit) |
-
-### Examples
-
-```bash
-# Save an observation
-curl -X POST http://localhost:7438/observations \
-  -H "Content-Type: application/json" \
-  -d '{
-    "title": "Fixed race condition in cache",
-    "type": "bugfix",
-    "content": "What: Fixed concurrent map write panic\nWhy: Multiple goroutines writing to shared cache\nWhere: internal/cache/lru.go\nLearned: Use sync.Map for concurrent access patterns",
-    "project": "api",
-    "importance": 0.8
-  }'
-
-# Search
-curl "http://localhost:7438/search?q=cache+race+condition&project=api"
-
-# Get stats
-curl http://localhost:7438/stats
-```
-
-## Search Scoring
-
-Results are ranked using a composite score:
-
-1. **FTS5 relevance** — base text match score
-2. **Temporal decay** — exponential decay with half-life of ~69 days
-3. **Importance boost** — `score *= (0.7 + 0.3 * importance)`
-4. **Access frequency** — logarithmic boost: `score *= log2(access_count + 2)`
-
-## Topic Keys
-
-For evolving topics, use `topic_key` to keep a single living memory that updates in place:
-
-```bash
-# First save creates the memory
-mio save "Auth system design" "Current: JWT with RS256" --type architecture --topic-key auth-system
-
-# Later save with same topic_key UPDATES instead of creating a new one
-mio save "Auth system design" "Current: JWT with RS256 + refresh tokens" --type architecture --topic-key auth-system
-```
-
-## Sync
-
-Chunk-based synchronization for multi-device setups. Chunks are gzip-compressed JSONL files stored in `~/.mio/chunks/`.
-
-```bash
-mio sync              # Export new data since last sync
-mio sync --import     # Import pending chunks
-mio sync --status     # Check sync status
-```
+| `GET` | `/skills` | List installed skills |
+| `GET` | `/skills/{name}` | Read skill content |
+| `PUT` | `/skills/{name}` | Update skill content |
+| `POST` | `/admin/setup` | Run mio setup |
 
 ## Architecture
 
 ```
-cmd/mio/main.go            CLI entrypoint and command routing
+cmd/mio/main.go               CLI entrypoint and command routing
 internal/
-  config/config.go          Configuration with defaults and env overrides
-  store/store.go            SQLite store: CRUD, search, metrics, import/export
-  mcp/mcp.go                MCP stdio server with 15 tools
-  server/server.go          HTTP REST API server
+  config/config.go             Configuration with defaults and env overrides
+  store/store.go               SQLite store: CRUD, search, metrics, import/export
+  mcp/mcp.go                   MCP stdio server with 15 tools
+  server/
+    server.go                  HTTP REST API (20 endpoints)
+    dashboard.go               Web dashboard, skill scanner, admin handlers
+    templates/dashboard.html   Retro-terminal SPA (6 pages, embedded)
   tui/
-    model.go                TUI state, screens, async commands
-    update.go               Input handling and navigation
-    view.go                 Screen rendering (dashboard, search, detail, timeline)
-    styles.go               Color palette and lipgloss styles
-  setup/setup.go            Automated MCP registration for Claude Code
+    model.go                   TUI state, screens, async commands
+    update.go                  Input handling and navigation
+    view.go                    Screen rendering (dashboard, search, detail, timeline)
+    styles.go                  Color palette and lipgloss styles
+  setup/setup.go               Setup + uninstall for Claude Code
   sync/
-    sync.go                 Chunk-based sync logic with manifest tracking
-    transport.go            File transport (gzip-compressed JSONL)
+    sync.go                    Chunk-based sync logic with manifest tracking
+    transport.go               File transport (gzip-compressed JSONL)
+skills/                        28 skills (SDD pipeline, coding, engineering, meta)
+  mio-architect/SKILL.md       Orchestrator — drives full SDD pipeline
+  sdd-*/SKILL.md               9 SDD phase skills + sdd-continue + sdd-ff
+  _shared/conventions.md       Shared reference (v2.0: inlined into each skill)
 ```
 
 ## Dependencies
@@ -376,7 +364,8 @@ make demo        # Run demo with sample data
 make run-tui     # Build and launch TUI
 make run-mcp     # Build and run MCP server
 make run-serve   # Build and run HTTP server
-make install     # Copy to /usr/local/bin
+make install     # Copy to /usr/local/bin (or PREFIX=~/.local)
+make uninstall   # Remove binary
 ```
 
 ## License

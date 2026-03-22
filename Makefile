@@ -1,7 +1,8 @@
-.PHONY: build run-mcp run-serve run-tui test clean install
+.PHONY: build run-mcp run-serve run-tui test clean install uninstall
 
 BINARY=mio
 BUILD_DIR=./bin
+PREFIX?=/usr/local
 UNAME_S := $(shell uname -s)
 
 build:
@@ -27,10 +28,19 @@ clean:
 	rm -f ~/.mio/mio.db
 
 install: build
-	cp $(BUILD_DIR)/$(BINARY) /usr/local/bin/$(BINARY)
+	@mkdir -p $(PREFIX)/bin
+	cp $(BUILD_DIR)/$(BINARY) $(PREFIX)/bin/$(BINARY)
 ifeq ($(UNAME_S),Darwin)
-	-codesign -f -s - /usr/local/bin/$(BINARY) 2>/dev/null
+	-codesign -f -s - $(PREFIX)/bin/$(BINARY) 2>/dev/null
 endif
+	@echo "Installed to $(PREFIX)/bin/$(BINARY)"
+	@echo "Run 'mio setup' to configure Claude Code integration"
+
+uninstall:
+	rm -f $(PREFIX)/bin/$(BINARY)
+	@echo "Binary removed from $(PREFIX)/bin/$(BINARY)"
+	@echo "Run 'mio uninstall' first to remove Claude Code integration"
+	@echo "Data in ~/.mio/ is preserved. Delete manually if desired."
 
 # Quick test: save and search
 demo: build

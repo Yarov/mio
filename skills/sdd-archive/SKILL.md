@@ -5,14 +5,18 @@ description: >
   Trigger: When archiving a change after implementation and verification.
 metadata:
   author: mio
-  version: "1.0"
+  version: "2.0"
 ---
 
 ## Purpose
 
 Merge delta specs into main specs (source of truth), then archive the change. Complete the SDD cycle.
 
-> Read `skills/_shared/conventions.md` for persistence and naming rules.
+## Persistence & Naming
+
+All SDD artifacts use deterministic naming: `title` and `topic_key` = `sdd/{change-name}/{artifact-type}`, `type` = `architecture`, `project` = detected project name. `topic_key` enables upserts (save again → update, not duplicate).
+
+**Two-step retrieval** (CRITICAL): `mcp__mio__mem_search` returns truncated previews. Always: (1) search → get ID, (2) `mcp__mio__mem_get_observation(id)` → full content. Never use search previews as source material.
 
 ## Steps
 
@@ -53,20 +57,18 @@ mcp__mio__mem_save(
   topic_key: "sdd/{change-name}/archive-report",
   type: "architecture",
   project: "{project}",
-  content: "# Archive: {change-name}\n\n## Artifacts\n- proposal: obs#{id}\n- spec: obs#{id}\n- design: obs#{id}\n- tasks: obs#{id}\n- verify: obs#{id}\n\n## Specs Synced\n{domains and changes}\n\n## Completed: {date}"
+  content: "# Archive: {change-name}\n\n## Artifacts\n- proposal: obs#{id}\n- spec: obs#{id}\n- design: obs#{id}\n- tasks: obs#{id}\n- verify: obs#{id}\n\n## Specs Synced\n{domains and changes}\n\n## Completed: {date ISO}"
 )
 ```
 
-### 5. Return Summary
+### 5. Return
 
 ```markdown
-## Change Archived
-**Change**: {change-name}
-
-### Specs Synced
-| Domain | Action | Details |
-|--------|--------|---------|
-| {domain} | Created/Updated | {N added, M modified} |
+**Status**: success
+**Summary**: Change {change-name} archived. SDD cycle complete.
+**Artifacts**: sdd/{change-name}/archive-report
+**Next**: Ready for next change
+**Risks**: None
 
 ### Artifact Lineage
 | Phase | Observation ID |
@@ -77,9 +79,6 @@ mcp__mio__mem_save(
 | tasks | #{id} |
 | verify | #{id} |
 | archive | #{id} |
-
-### SDD Cycle Complete
-Ready for the next change.
 ```
 
 ## Rules

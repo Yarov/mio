@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mio — Persistent Memory</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+  :root {
+    --bg: #0a0a0f; --surface: #12121a; --surface2: #1a1a26; --surface3: #22222e;
+    --border: #2a2a3a; --border-glow: #3a3a5a;
+    --text: #e0e0f0; --text2: #6a6a8a; --text3: #4a4a6a;
+    --cyan: #00f0ff; --magenta: #ff00aa; --green: #00ff88;
+    --yellow: #ffdd00; --red: #ff3366; --purple: #aa66ff;
+    --orange: #ff8844; --blue: #4488ff;
+    --glow-cyan: 0 0 20px #00f0ff33, 0 0 40px #00f0ff11;
+    --glow-green: 0 0 20px #00ff8833;
+    --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
+    --font-display: 'Space Grotesk', system-ui, sans-serif;
+    --header-h: 52px;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: var(--font-mono); background: var(--bg); color: var(--text);
+    line-height: 1.6; min-height: 100vh;
+    background-image:
+      radial-gradient(ellipse at 20% 50%, #00f0ff05 0%, transparent 50%),
+      radial-gradient(ellipse at 80% 20%, #ff00aa05 0%, transparent 50%);
+  }
+  body::after {
+    content:''; position:fixed; inset:0; pointer-events:none; z-index:9999;
+    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.02) 2px, rgba(0,0,0,0.02) 4px);
+  }
+  a { color: var(--cyan); text-decoration: none; }
+  code { background: var(--bg); padding: 2px 8px; border-radius: 2px; font-size: 12px; color: var(--green); border: 1px solid var(--border); }
+
+  /* Header - sticky */
+  .header {
+    position: sticky; top: 0; z-index: 100;
+    background: var(--surface); border-bottom: 1px solid var(--border);
+    height: var(--header-h); padding: 0 24px;
+    display: flex; align-items: center; gap: 20px;
+    backdrop-filter: blur(20px); background: rgba(18,18,26,0.92);
+  }
+  .logo { font-family: var(--font-display); font-size: 22px; font-weight: 700; background: linear-gradient(135deg, var(--cyan), var(--magenta)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .nav-tabs { display: flex; gap: 2px; margin-left: 32px; }
+  .nav-tab {
+    padding: 8px 16px; font-size: 11px; color: var(--text3);
+    text-transform: uppercase; letter-spacing: 1.5px; cursor: pointer;
+    border: 1px solid transparent; border-radius: 4px; transition: all 0.2s;
+    font-family: var(--font-mono); background: none;
+  }
+  .nav-tab:hover { color: var(--text2); background: var(--surface2); }
+  .nav-tab.active { color: var(--cyan); border-color: var(--cyan); background: #00f0ff08; }
+  .header-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+  .header-stat { font-size: 11px; color: var(--text3); }
+  .header-stat b { color: var(--cyan); font-weight: 500; }
+
+  /* Pages */
+  .page { display: none; max-width: 1300px; margin: 0 auto; padding: 28px 32px; }
+  .page.active { display: block; }
+
+  /* Cards / Boxes */
+  .box {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 4px;
+    padding: 24px; margin-bottom: 24px; position: relative;
+  }
+  .box-label {
+    position: absolute; top: -10px; left: 16px;
+    background: var(--bg); padding: 0 8px; font-size: 10px;
+    letter-spacing: 2px; text-transform: uppercase;
+  }
+  .box-label.cyan { color: var(--cyan); }
+  .box-label.magenta { color: var(--magenta); }
+  .box-label.green { color: var(--green); }
+  .box-label.purple { color: var(--purple); }
+  .box-label.yellow { color: var(--yellow); }
+
+  /* Stats row */
+  .stats-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 28px; }
+  .stat { background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 14px; position: relative; overflow: hidden; transition: all 0.3s; }
+  .stat::before { content:''; position:absolute; top:0; left:0; right:0; height:2px; background: linear-gradient(90deg, var(--cyan), var(--magenta)); opacity:0; transition: opacity 0.3s; }
+  .stat:hover::before { opacity: 1; }
+  .stat:hover { border-color: var(--border-glow); }
+  .stat-label { font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: 1.5px; }
+  .stat-val { font-size: 30px; font-weight: 300; margin-top: 6px; font-family: var(--font-display); }
+
+  /* Grid layouts */
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .three-col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+
+  /* Section heading */
+  .sh { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+  .sh h3 { font-family: var(--font-display); font-size: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 2px; color: var(--text2); }
+  .sh .line { flex:1; height:1px; background: linear-gradient(90deg, var(--border), transparent); }
+  .sh .tag { font-size: 10px; padding: 3px 10px; border-radius: 3px; border: 1px solid var(--border); color: var(--text3); text-transform: uppercase; letter-spacing: 1px; }
+
+  /* Feature list */
+  .feat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+  .feat { background: var(--bg); border: 1px solid var(--border); border-left: 3px solid var(--border); border-radius: 4px; padding: 14px; font-size: 12px; color: var(--text2); transition: all 0.2s; }
+  .feat:hover { border-left-color: var(--cyan); background: var(--surface2); }
+  .feat b { display: block; margin-bottom: 4px; color: var(--text); font-size: 13px; }
+
+  /* Pipeline */
+  .pipe-flow { display: flex; align-items: center; gap: 0; flex-wrap: wrap; justify-content: center; padding: 16px 0; }
+  .pipe-node { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 12px 18px; font-size: 12px; font-weight: 500; text-align: center; min-width: 95px; transition: all 0.3s; cursor: pointer; position: relative; }
+  .pipe-node:hover { border-color: var(--cyan); color: var(--cyan); transform: translateY(-3px); }
+  .pipe-node .ico { font-size: 14px; display: block; margin-bottom: 4px; opacity: 0.7; }
+  .pipe-node .sub { font-size: 10px; color: var(--text3); margin-top: 2px; }
+  .pipe-node.selected { border-color: var(--magenta); color: var(--magenta); background: #ff00aa08; }
+  .pipe-arrow { color: var(--text3); font-size: 12px; padding: 0 6px; }
+  .pipe-parallel { display: flex; flex-direction: column; gap: 6px; align-items: center; border: 1px dashed var(--border); border-radius: 4px; padding: 8px 12px; background: #00f0ff04; }
+  .pipe-parallel-label { font-size: 9px; color: var(--cyan); text-transform: uppercase; letter-spacing: 2px; }
+  .pipe-detail { margin-top: 20px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 20px; font-size: 13px; color: var(--text2); display: none; }
+  .pipe-detail.visible { display: block; }
+  .pipe-detail h4 { color: var(--text); margin-bottom: 8px; font-size: 14px; font-family: var(--font-display); }
+  .pipe-detail .detail-meta { font-size: 11px; color: var(--text3); margin-bottom: 12px; }
+  .pipe-detail ul { margin-left: 16px; }
+  .pipe-detail li { margin-bottom: 4px; }
+
+  /* Architecture */
+  .arch-grid { display: grid; grid-template-columns: 1fr 180px 1fr; gap: 20px; align-items: start; padding: 12px 0; }
+  .arch-col { display: flex; flex-direction: column; gap: 10px; }
+  .arch-node { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 12px 16px; font-size: 12px; transition: all 0.2s; }
+  .arch-node:hover { transform: translateX(3px); }
+  .arch-node .nt { font-weight: 600; color: var(--text); margin-bottom: 3px; font-size: 13px; }
+  .arch-node .nd { color: var(--text3); font-size: 11px; }
+  .arch-node.iface { border-left: 3px solid var(--magenta); }
+  .arch-node.data { border-left: 3px solid var(--green); }
+  .arch-core { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 24px 16px; border: 1px dashed var(--border); border-radius: 4px; background: #00f0ff04; text-align: center; }
+  .arch-core-title { font-family: var(--font-display); font-size: 20px; font-weight: 700; background: linear-gradient(135deg, var(--cyan), var(--green)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .arch-core-sub { font-size: 10px; color: var(--text3); letter-spacing: 2px; text-transform: uppercase; }
+  .arch-core-detail { font-size: 10px; color: var(--text3); line-height: 1.8; margin-top: 8px; }
+
+  /* Skills */
+  .skills-filter { display: flex; gap: 4px; margin-bottom: 16px; flex-wrap: wrap; }
+  .skills-filter button { background: none; border: 1px solid var(--border); border-radius: 4px; padding: 5px 12px; font-size: 10px; font-family: var(--font-mono); color: var(--text3); cursor: pointer; text-transform: uppercase; letter-spacing: 1px; transition: all 0.2s; }
+  .skills-filter button:hover { border-color: var(--text2); color: var(--text2); }
+  .skills-filter button.active { border-color: var(--cyan); color: var(--cyan); background: #00f0ff08; }
+  .skills-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px; }
+  .skill-card { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--border); border-radius: 4px; padding: 12px 14px; transition: all 0.2s; cursor: pointer; }
+  .skill-card:hover { border-left-color: var(--green); background: var(--surface2); transform: translateX(3px); }
+  .skill-card.selected { border-left-color: var(--cyan); background: var(--surface2); border-color: var(--cyan); }
+  .skill-head { display: flex; align-items: center; gap: 8px; }
+  .skill-name { font-size: 13px; font-weight: 500; }
+  .skill-ver { font-size: 10px; color: var(--text3); }
+  .skill-desc { font-size: 11px; color: var(--text3); margin-top: 4px; line-height: 1.5; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .cat-badge { font-size: 9px; padding: 1px 6px; border-radius: 2px; text-transform: uppercase; letter-spacing: 1px; border: 1px solid; font-weight: 600; }
+  .cat-sdd { border-color: var(--magenta); color: var(--magenta); }
+  .cat-orchestrator { border-color: var(--cyan); color: var(--cyan); }
+  .cat-coding { border-color: var(--green); color: var(--green); }
+  .cat-engineering { border-color: var(--yellow); color: var(--yellow); }
+  .cat-ads { border-color: var(--orange); color: var(--orange); }
+  .cat-meta { border-color: var(--purple); color: var(--purple); }
+  .cat-other { border-color: var(--text3); color: var(--text3); }
+
+  /* Skill layout */
+  .skill-layout { display: grid; grid-template-columns: 320px 1fr; gap: 20px; }
+  .skill-sidebar { max-height: calc(100vh - 140px); overflow-y: auto; }
+  .skill-panel { min-height: 500px; }
+
+  /* Skill Editor */
+  .skill-editor { display: none; }
+  .skill-editor.visible { display: flex; flex-direction: column; height: calc(100vh - 180px); }
+  .skill-editor-header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-shrink: 0; flex-wrap: wrap; }
+
+  .editor-tab {
+    background: none; border: 1px solid var(--border); border-radius: 3px;
+    padding: 4px 12px; font-size: 10px; font-family: var(--font-mono);
+    color: var(--text3); cursor: pointer; text-transform: uppercase; letter-spacing: 1px; transition: all 0.2s;
+  }
+  .editor-tab:hover { color: var(--text2); border-color: var(--text2); }
+  .editor-tab.active { color: var(--cyan); border-color: var(--cyan); background: #00f0ff08; }
+
+  .editor-view { flex: 1; min-height: 0; overflow: hidden; }
+
+  /* Code editor with line numbers */
+  .editor-wrap { display: flex; height: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
+  .editor-gutter {
+    width: 44px; padding: 14px 8px 14px 0; text-align: right;
+    font-size: 11px; line-height: 1.7; color: var(--text3); background: var(--surface);
+    border-right: 1px solid var(--border); user-select: none; overflow: hidden;
+    font-family: var(--font-mono); flex-shrink: 0;
+  }
+  .skill-editor textarea, .skill-editor .editor-wrap textarea {
+    flex: 1; width: 100%; height: 100%; background: var(--bg); border: none;
+    padding: 14px 16px; font-family: var(--font-mono); font-size: 12px;
+    color: var(--text); resize: none; outline: none; line-height: 1.7; tab-size: 2;
+    overflow-y: auto;
+  }
+  .skill-editor textarea:focus { box-shadow: none; }
+
+  /* Markdown preview */
+  .md-preview {
+    height: 100%; overflow-y: auto; padding: 20px 24px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 4px;
+    font-size: 13px; line-height: 1.8; color: var(--text2);
+  }
+  .md-preview h1,.md-preview h2,.md-preview h3,.md-preview h4 { color: var(--text); font-family: var(--font-display); margin: 20px 0 10px; }
+  .md-preview h1 { font-size: 20px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+  .md-preview h2 { font-size: 17px; color: var(--cyan); }
+  .md-preview h3 { font-size: 15px; color: var(--magenta); }
+  .md-preview h4 { font-size: 13px; color: var(--purple); }
+  .md-preview p { margin-bottom: 12px; }
+  .md-preview ul,.md-preview ol { margin: 8px 0 12px 20px; }
+  .md-preview li { margin-bottom: 4px; }
+  .md-preview code { background: var(--bg); padding: 2px 6px; border-radius: 3px; font-size: 12px; color: var(--green); border: 1px solid var(--border); font-family: var(--font-mono); }
+  .md-preview pre { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 14px 16px; overflow-x: auto; margin: 12px 0; }
+  .md-preview pre code { background: none; border: none; padding: 0; color: var(--text); font-size: 12px; line-height: 1.7; }
+  .md-preview blockquote { border-left: 3px solid var(--cyan); padding: 4px 16px; margin: 12px 0; color: var(--text3); background: #00f0ff06; border-radius: 0 4px 4px 0; }
+  .md-preview table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 12px; }
+  .md-preview th { background: var(--surface2); text-align: left; padding: 8px 12px; border: 1px solid var(--border); color: var(--text); font-weight: 600; }
+  .md-preview td { padding: 8px 12px; border: 1px solid var(--border); }
+  .md-preview strong { color: var(--text); font-weight: 600; }
+  .md-preview hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+  .md-preview a { color: var(--cyan); }
+
+  /* Split pane */
+  .split-pane { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; height: 100%; }
+  .split-left,.split-right { min-height: 0; overflow: hidden; }
+
+  .skill-editor-actions { display: flex; gap: 8px; margin-top: 10px; flex-shrink: 0; align-items: center; }
+
+  @media (max-width:1000px) { .skill-layout { grid-template-columns: 1fr; } .split-pane { grid-template-columns: 1fr; } }
+
+  /* Obs cards */
+  .obs-list { display: flex; flex-direction: column; gap: 6px; }
+  .obs-card { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--border); border-radius: 4px; padding: 12px 16px; display: flex; gap: 12px; align-items: flex-start; cursor: pointer; transition: all 0.2s; }
+  .obs-card:hover { border-left-color: var(--cyan); background: var(--surface2); transform: translateX(3px); }
+  .obs-type { font-size: 10px; font-weight: 600; text-transform: uppercase; padding: 2px 8px; border-radius: 2px; white-space: nowrap; border: 1px solid; font-family: var(--font-mono); }
+  .type-bugfix { border-color: var(--red); color: var(--red); }
+  .type-decision { border-color: var(--blue); color: var(--blue); }
+  .type-architecture { border-color: var(--purple); color: var(--purple); }
+  .type-discovery { border-color: var(--green); color: var(--green); }
+  .type-pattern { border-color: var(--yellow); color: var(--yellow); }
+  .type-config { border-color: var(--orange); color: var(--orange); }
+  .type-preference { border-color: var(--cyan); color: var(--cyan); }
+  .type-learning { border-color: var(--green); color: var(--green); }
+  .type-summary { border-color: var(--text3); color: var(--text2); }
+  .obs-body { flex: 1; min-width: 0; }
+  .obs-title { font-size: 13px; font-weight: 500; }
+  .obs-meta { font-size: 10px; color: var(--text3); margin-top: 4px; letter-spacing: 0.5px; }
+  .obs-preview { font-size: 11px; color: var(--text3); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* Session cards */
+  .sess-card { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--border); border-radius: 4px; padding: 12px 16px; transition: all 0.2s; }
+  .sess-card:hover { border-left-color: var(--magenta); background: var(--surface2); }
+  .sess-project { font-weight: 500; color: var(--magenta); font-size: 13px; }
+  .sess-meta { font-size: 11px; color: var(--text3); margin-top: 3px; }
+
+  /* Search */
+  .search-bar { display: flex; gap: 8px; margin-bottom: 20px; }
+  .search-bar input { flex: 1; background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 10px 16px; color: var(--text); font-size: 13px; font-family: var(--font-mono); outline: none; transition: all 0.2s; }
+  .search-bar input::placeholder { color: var(--text3); }
+  .search-bar input:focus { border-color: var(--cyan); box-shadow: 0 0 0 1px var(--cyan), var(--glow-cyan); }
+  .btn { background: transparent; border: 1px solid var(--border); border-radius: 4px; padding: 10px 20px; font-family: var(--font-mono); font-size: 11px; color: var(--text2); cursor: pointer; text-transform: uppercase; letter-spacing: 1px; transition: all 0.2s; }
+  .btn:hover { border-color: var(--cyan); color: var(--cyan); background: #00f0ff08; }
+  .btn.primary { border-color: var(--green); color: var(--green); }
+  .btn.primary:hover { background: var(--green); color: var(--bg); box-shadow: var(--glow-green); }
+  .btn.danger { border-color: var(--red); color: var(--red); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* Admin output */
+  .admin-out { margin-top: 16px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 14px; font-size: 11px; color: var(--green); white-space: pre-wrap; display: none; max-height: 200px; overflow-y: auto; }
+  .admin-out.visible { display: block; }
+
+  /* Modal */
+  .modal-bg { display:none; position:fixed; inset:0; z-index:200; background:rgba(5,5,10,0.85); backdrop-filter:blur(8px); justify-content:center; align-items:center; }
+  .modal-bg.active { display:flex; }
+  .modal { background:var(--surface); border:1px solid var(--border); border-radius:4px; max-width:750px; width:92%; max-height:82vh; overflow-y:auto; padding:28px; box-shadow: 0 0 60px #00f0ff11; position:relative; }
+  .modal::before { content:'MEM://DETAIL'; position:absolute; top:-10px; left:16px; background:var(--surface); padding:0 8px; font-size:10px; color:var(--cyan); letter-spacing:2px; }
+  .modal h3 { margin-bottom:16px; font-family:var(--font-display); }
+  .modal pre { background:var(--bg); border:1px solid var(--border); border-radius:4px; padding:16px; font-size:12px; white-space:pre-wrap; word-break:break-word; color:var(--text2); line-height:1.7; }
+  .modal .xclose { position:absolute; top:16px; right:16px; cursor:pointer; font-size:14px; color:var(--text3); width:28px; height:28px; display:flex; align-items:center; justify-content:center; border:1px solid var(--border); border-radius:4px; transition:all 0.2s; background:none; font-family:var(--font-mono); }
+  .modal .xclose:hover { color:var(--red); border-color:var(--red); }
+
+  /* Responsive */
+  @media (max-width:900px) { .two-col,.arch-grid { grid-template-columns:1fr; } .stats-row { grid-template-columns: repeat(3,1fr); } .three-col { grid-template-columns: 1fr 1fr; } }
+  @media (max-width:600px) { .stats-row { grid-template-columns: repeat(2,1fr); } .three-col { grid-template-columns: 1fr; } .nav-tabs { gap: 0; } .nav-tab { padding: 6px 10px; font-size: 10px; } }
+
+  ::-webkit-scrollbar { width:6px; } ::-webkit-scrollbar-track { background:var(--bg); } ::-webkit-scrollbar-thumb { background:var(--border); border-radius:3px; }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <div class="logo">MIO</div>
+  <div class="nav-tabs">
+    <button class="nav-tab active" onclick="showPage('dashboard')">Dashboard</button>
+    <button class="nav-tab" onclick="showPage('arch')">Architecture</button>
+    <button class="nav-tab" onclick="showPage('pipeline')">Pipeline</button>
+    <button class="nav-tab" onclick="showPage('skills')">Skills</button>
+    <button class="nav-tab" onclick="showPage('memories')">Memories</button>
+    <button class="nav-tab" onclick="showPage('admin')">Admin</button>
+  </div>
+  <div class="header-right">
+    <span class="header-stat"><b>{{.Metrics.TotalObservations}}</b> memories</span>
+    <span class="header-stat"><b>{{.SkillCount}}</b> skills</span>
+  </div>
+</div>
+
+<!-- ============ PAGE: DASHBOARD ============ -->
+<div class="page active" id="page-dashboard">
+  <div class="stats-row">
+    <div class="stat"><div class="stat-label">memories</div><div class="stat-val" style="color:var(--cyan);text-shadow:var(--glow-cyan)">{{.Metrics.TotalObservations}}</div></div>
+    <div class="stat"><div class="stat-label">sessions</div><div class="stat-val" style="color:var(--magenta)">{{.Metrics.TotalSessions}}</div></div>
+    <div class="stat"><div class="stat-label">searches</div><div class="stat-val" style="color:var(--green)">{{.Metrics.TotalSearches}}</div></div>
+    <div class="stat"><div class="stat-label">hit rate</div><div class="stat-val" style="color:var(--yellow)">{{printf "%.1f" .Metrics.SearchHitRate}}%</div></div>
+    <div class="stat"><div class="stat-label">latency</div><div class="stat-val" style="color:var(--text2)">{{.Metrics.AvgSearchLatencyMs}}ms</div></div>
+    <div class="stat"><div class="stat-label">stale</div><div class="stat-val" style="color:var(--purple)">{{.Metrics.StaleMemoryCount}}</div></div>
+  </div>
+
+  <div class="box"><span class="box-label cyan">SYS://INFO</span>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:10px;"><strong style="color:var(--cyan)">Mio</strong> is a persistent memory system for AI coding agents. It gives Claude Code the ability to remember decisions, discoveries, and context across sessions.</p>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:16px;">3 interfaces: <strong style="color:var(--cyan)">MCP</strong> (15 tools), <strong style="color:var(--cyan)">HTTP API</strong> (15 endpoints), <strong style="color:var(--cyan)">TUI</strong> (<code>mio tui</code>).</p>
+    <div class="feat-grid">
+      <div class="feat"><b>FTS5 Search</b>Full-text search with temporal decay, importance boost, and frequency scoring.</div>
+      <div class="feat"><b>Deduplication</b>15-min window with normalized content hashing.</div>
+      <div class="feat"><b>Topic Upserts</b>Evolving topics update in place via <code>topic_key</code>.</div>
+      <div class="feat"><b>Relations</b>supersedes, relates_to, contradicts, builds_on, caused_by, resolved_by.</div>
+      <div class="feat"><b>Sessions</b>Track work sessions with projects and summaries.</div>
+      <div class="feat"><b>Sync</b>Chunk-based gzip export for multi-device sync.</div>
+    </div>
+  </div>
+
+  <div class="two-col">
+    <div>
+      <div class="sh"><h3>Recent Memories</h3><div class="line"></div><span class="tag">last 20</span></div>
+      <div class="obs-list">
+        {{range .Observations}}
+        <div class="obs-card" onclick="showObs({{.ID}})">
+          <span class="obs-type type-{{.Type}}">{{.Type}}</span>
+          <div class="obs-body"><div class="obs-title">{{.Title}}</div><div class="obs-meta">#{{.ID}} {{with deref .Project}}/ {{.}}{{end}} / {{.CreatedAt}}</div></div>
+        </div>
+        {{else}}<p style="color:var(--text3);font-size:13px;">No memories yet.</p>{{end}}
+      </div>
+    </div>
+    <div>
+      <div class="sh"><h3>Sessions</h3><div class="line"></div><span class="tag">recent</span></div>
+      {{range .Sessions}}
+      <div class="sess-card"><div class="sess-project">{{.Project}}</div><div class="sess-meta">{{.ID}} / {{.StartedAt}}</div></div>
+      {{else}}<p style="color:var(--text3);font-size:13px;">No sessions yet.</p>{{end}}
+    </div>
+  </div>
+</div>
+
+<!-- ============ PAGE: ARCHITECTURE ============ -->
+<div class="page" id="page-arch">
+  <div class="box"><span class="box-label purple">SYS://ARCHITECTURE</span>
+    <p style="font-size:12px;color:var(--text3);margin-bottom:20px;">How Mio's components connect. 4 interfaces feed into the central store, backed by SQLite with FTS5.</p>
+    <div class="arch-grid">
+      <div class="arch-col">
+        <div style="font-size:10px;color:var(--magenta);text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;">Interfaces</div>
+        <div class="arch-node iface"><div class="nt">MCP Server (stdio)</div><div class="nd">15 tools. Claude Code communicates here. mem_save, mem_search, mem_context, mem_session_*, mem_relate...</div></div>
+        <div class="arch-node iface"><div class="nt">HTTP REST API</div><div class="nd">15 endpoints. This dashboard + /search, /observations CRUD, /sessions, /stats, /export, /import.</div></div>
+        <div class="arch-node iface"><div class="nt">Terminal UI (Bubbletea)</div><div class="nd">8 screens: dashboard, search, results, detail, timeline, sessions. Run <code>mio tui</code>.</div></div>
+        <div class="arch-node iface"><div class="nt">CLI Commands</div><div class="nd">mio save/search/context/timeline/stats/export/import/sync. Direct terminal access.</div></div>
+      </div>
+      <div class="arch-core">
+        <div class="arch-core-title">STORE</div>
+        <div class="arch-core-sub">sqlite + fts5</div>
+        <div class="arch-core-detail">WAL mode<br>Temporal decay<br>Dedup hashing<br>Topic upserts<br>Auto-relations<br>6 tables + FTS<br>Busy timeout 5s</div>
+      </div>
+      <div class="arch-col">
+        <div style="font-size:10px;color:var(--green);text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;">Data Layer</div>
+        <div class="arch-node data"><div class="nt">Observations</div><div class="nd">Core memories: title, content, type, project, importance, topic_key. FTS5 indexed.</div></div>
+        <div class="arch-node data"><div class="nt">Sessions</div><div class="nd">Work sessions with project, directory, start/end times, structured summaries.</div></div>
+        <div class="arch-node data"><div class="nt">Relations</div><div class="nd">6 types: supersedes, relates_to, contradicts, builds_on, caused_by, resolved_by.</div></div>
+        <div class="arch-node data"><div class="nt">Sync + Prompts</div><div class="nd">Chunk-based export with gzip. Prompt capture for replay. Manifest dedup.</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="box"><span class="box-label green">SYS://SETUP</span>
+    <p style="font-size:12px;color:var(--text3);margin-bottom:12px;"><code>mio setup</code> installs into Claude Code:</p>
+    <div class="three-col">
+      <div class="feat"><b>~/.claude/mcp/mio.json</b>MCP server registration. Points to the mio binary.</div>
+      <div class="feat"><b>~/.claude/settings.json</b>15 tools added to permissions.allow + statusline config.</div>
+      <div class="feat"><b>~/.claude/CLAUDE.md</b>Memory protocol injected. Proactive save, search, session rules.</div>
+      <div class="feat"><b>~/.claude/skills/</b>All SDD and coding skills copied here. Auto-detected by Claude.</div>
+      <div class="feat"><b>~/.claude/statusline.sh</b>Shows memory count and last search in status bar.</div>
+      <div class="feat"><b>~/.mio/mio.db</b>SQLite database. Created on first run. All data lives here.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ PAGE: PIPELINE ============ -->
+<div class="page" id="page-pipeline">
+  <div class="box"><span class="box-label magenta">SDD://PIPELINE v2.0</span>
+    <p style="font-size:12px;color:var(--text3);margin-bottom:20px;">Spec-Driven Development. The Mio Architect orchestrates each phase as a sub-agent with fresh context. Click a phase for details.</p>
+    <div class="pipe-flow">
+      <div class="pipe-node" onclick="showPhase('init')"><span class="ico">></span>init<div class="sub">detect stack</div></div>
+      <span class="pipe-arrow">---></span>
+      <div class="pipe-node" onclick="showPhase('explore')"><span class="ico">?</span>explore<div class="sub">investigate</div></div>
+      <span class="pipe-arrow">---></span>
+      <div class="pipe-node" onclick="showPhase('propose')"><span class="ico">#</span>propose<div class="sub">scope + risks</div></div>
+      <span class="pipe-arrow">---></span>
+      <div class="pipe-parallel">
+        <div class="pipe-parallel-label">// parallel</div>
+        <div class="pipe-node" onclick="showPhase('spec')"><span class="ico">$</span>spec<div class="sub">requirements</div></div>
+        <div class="pipe-node" onclick="showPhase('design')"><span class="ico">&</span>design<div class="sub">architecture</div></div>
+      </div>
+      <span class="pipe-arrow">---></span>
+      <div class="pipe-node" onclick="showPhase('tasks')"><span class="ico">%</span>tasks<div class="sub">break down</div></div>
+      <span class="pipe-arrow">---></span>
+      <div class="pipe-node" onclick="showPhase('apply')"><span class="ico">*</span>apply<div class="sub">implement</div></div>
+      <span class="pipe-arrow">---></span>
+      <div class="pipe-node" onclick="showPhase('verify')"><span class="ico">!</span>verify<div class="sub">quality gate</div></div>
+      <span class="pipe-arrow">---></span>
+      <div class="pipe-node" onclick="showPhase('archive')"><span class="ico">~</span>archive<div class="sub">close cycle</div></div>
+    </div>
+    <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border);font-size:12px;color:var(--text3);display:flex;gap:20px;flex-wrap:wrap;">
+      <span><code>/mio-architect</code> full pipeline</span>
+      <span><code>/sdd-ff</code> fast-forward</span>
+      <span><code>/sdd-continue</code> auto-resume</span>
+    </div>
+  </div>
+
+  <div id="phase-detail" class="pipe-detail"></div>
+
+  <div class="box"><span class="box-label cyan">SDD://RULES</span>
+    <div class="three-col">
+      <div class="feat"><b>Scope Assessment</b>Small (1-2 files): skip SDD. Medium (3-5): /sdd-ff. Large (6+): full pipeline.</div>
+      <div class="feat"><b>Delegated Execution</b>Each phase runs as a sub-agent with fresh context via the Agent tool. Orchestrator never codes.</div>
+      <div class="feat"><b>Word Budgets</b>proposal: 400w, spec: 650w, design: 800w, tasks: 530w. Prevents context pollution.</div>
+      <div class="feat"><b>Parallel Phases</b>spec + design run simultaneously after proposal. Both depend on proposal, not each other.</div>
+      <div class="feat"><b>Recovery</b>/sdd-continue detects state from Mio memory and resumes. Works across sessions.</div>
+      <div class="feat"><b>Two-Step Retrieval</b>mem_search returns previews only. Always call mem_get_observation(id) for full content.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ PAGE: SKILLS ============ -->
+<div class="page" id="page-skills">
+  <div class="sh"><h3>Installed Skills</h3><div class="line"></div><span class="tag">{{.SkillCount}} loaded</span></div>
+
+  <div class="skills-filter" id="skill-filters">
+    <button class="active" onclick="filterSkills('all')">all</button>
+    <button onclick="filterSkills('sdd')">sdd pipeline</button>
+    <button onclick="filterSkills('orchestrator')">orchestrator</button>
+    <button onclick="filterSkills('coding')">coding</button>
+    <button onclick="filterSkills('engineering')">engineering</button>
+    <button onclick="filterSkills('ads')">ads</button>
+    <button onclick="filterSkills('meta')">meta</button>
+  </div>
+
+  <!-- Skill list (sidebar) -->
+  <div class="skill-layout">
+    <div class="skill-sidebar">
+      <div class="skills-grid" id="skills-list">
+        {{range .Skills}}
+        <div class="skill-card" data-cat="{{.Category}}" data-name="{{.Name}}" onclick="loadSkill('{{.Name}}')">
+          <div class="skill-head">
+            <span class="cat-badge cat-{{.Category}}">{{.Category}}</span>
+            <span class="skill-name">/{{.Name}}</span>
+            {{if .Version}}<span class="skill-ver">v{{.Version}}</span>{{end}}
+          </div>
+          {{if .Description}}<div class="skill-desc">{{.Description}}</div>{{end}}
+        </div>
+        {{end}}
+      </div>
+    </div>
+
+    <!-- Editor + Preview panel -->
+    <div class="skill-panel">
+      <div id="editor-placeholder" style="color:var(--text3);font-size:13px;padding:40px 20px;text-align:center;">
+        <div style="font-size:32px;margin-bottom:12px;opacity:0.3;">{ }</div>
+        Select a skill from the list to view and edit
+      </div>
+      <div class="skill-editor" id="skill-editor">
+        <div class="skill-editor-header">
+          <h3 id="editor-title" style="font-family:var(--font-display);font-size:15px;"></h3>
+          <span id="editor-path" style="font-size:10px;color:var(--text3);"></span>
+          <div style="margin-left:auto;display:flex;gap:4px;">
+            <button class="editor-tab active" id="tab-preview" onclick="setEditorTab('preview')">preview</button>
+            <button class="editor-tab" id="tab-edit" onclick="setEditorTab('edit')">edit</button>
+            <button class="editor-tab" id="tab-split" onclick="setEditorTab('split')">split</button>
+          </div>
+        </div>
+
+        <!-- Preview mode -->
+        <div class="editor-view" id="view-preview">
+          <div class="md-preview" id="md-preview"></div>
+        </div>
+
+        <!-- Edit mode -->
+        <div class="editor-view" id="view-edit" style="display:none;">
+          <div class="editor-wrap">
+            <div class="editor-gutter" id="editor-gutter"></div>
+            <textarea id="editor-content" spellcheck="false" oninput="onEditorInput()"></textarea>
+          </div>
+        </div>
+
+        <!-- Split mode -->
+        <div class="editor-view" id="view-split" style="display:none;">
+          <div class="split-pane">
+            <div class="split-left">
+              <div class="editor-wrap">
+                <div class="editor-gutter" id="editor-gutter-split"></div>
+                <textarea id="editor-content-split" spellcheck="false" oninput="onSplitInput()"></textarea>
+              </div>
+            </div>
+            <div class="split-right">
+              <div class="md-preview" id="md-preview-split"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="skill-editor-actions">
+          <button class="btn primary" onclick="saveSkill()" id="btn-save-skill">save</button>
+          <button class="btn" onclick="closeEditor()">close</button>
+          <span id="editor-status" style="font-size:11px;color:var(--text3);margin-left:8px;"></span>
+          <span style="margin-left:auto;font-size:10px;color:var(--text3);" id="editor-info"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ PAGE: MEMORIES ============ -->
+<div class="page" id="page-memories">
+  <div class="sh"><h3>Search Memories</h3><div class="line"></div><span class="tag">fts5</span></div>
+  <div class="search-bar">
+    <input type="text" id="search-input" placeholder="> search memories..." onkeydown="if(event.key==='Enter')doSearch()">
+    <button class="btn" onclick="doSearch()">exec</button>
+  </div>
+  <div id="search-results"></div>
+
+  <div style="margin-top:32px;">
+    <div class="sh"><h3>All Memories</h3><div class="line"></div><span class="tag">recent</span></div>
+    <div class="obs-list">
+      {{range .Observations}}
+      <div class="obs-card" onclick="showObs({{.ID}})">
+        <span class="obs-type type-{{.Type}}">{{.Type}}</span>
+        <div class="obs-body"><div class="obs-title">{{.Title}}</div><div class="obs-meta">#{{.ID}} {{with deref .Project}}/ {{.}}{{end}} / {{.CreatedAt}}</div></div>
+      </div>
+      {{else}}<p style="color:var(--text3);">No memories yet.</p>{{end}}
+    </div>
+  </div>
+</div>
+
+<!-- ============ PAGE: ADMIN ============ -->
+<div class="page" id="page-admin">
+  <div class="box"><span class="box-label yellow">ADMIN://CONTROL</span>
+    <p style="font-size:12px;color:var(--text3);margin-bottom:16px;">Manage your Mio installation. Update skills, export data, or reinstall configuration.</p>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;">
+      <button class="btn primary" onclick="runSetup()" id="btn-setup">reinstall / update</button>
+      <button class="btn" onclick="window.location.reload()">refresh dashboard</button>
+      <button class="btn" onclick="window.open('/export','_blank')">export all data</button>
+      <button class="btn" onclick="window.open('/stats','_blank')">api stats (json)</button>
+      <button class="btn" onclick="window.open('/health','_blank')">health check</button>
+    </div>
+    <div class="admin-out" id="admin-output"></div>
+  </div>
+
+  <div class="box"><span class="box-label cyan">ADMIN://ENDPOINTS</span>
+    <p style="font-size:12px;color:var(--text3);margin-bottom:16px;">HTTP API reference — all endpoints available on this server.</p>
+    <div class="three-col">
+      <div class="feat"><b>GET /health</b>Server health check.</div>
+      <div class="feat"><b>POST /observations</b>Save a new memory.</div>
+      <div class="feat"><b>GET /observations/:id</b>Get full observation.</div>
+      <div class="feat"><b>PUT /observations/:id</b>Update title/content.</div>
+      <div class="feat"><b>DELETE /observations/:id</b>Soft delete (?hard=true).</div>
+      <div class="feat"><b>GET /search?q=...</b>FTS5 search.</div>
+      <div class="feat"><b>GET /context</b>Recent memories.</div>
+      <div class="feat"><b>GET /timeline/:id</b>Timeline around obs.</div>
+      <div class="feat"><b>GET /relations/:id</b>Related observations.</div>
+      <div class="feat"><b>POST /sessions</b>Start new session.</div>
+      <div class="feat"><b>PUT /sessions/:id/end</b>End session.</div>
+      <div class="feat"><b>GET /sessions</b>List sessions.</div>
+      <div class="feat"><b>GET /stats</b>Memory metrics.</div>
+      <div class="feat"><b>GET /export</b>Export all as JSON.</div>
+      <div class="feat"><b>POST /import</b>Import from JSON.</div>
+      <div class="feat"><b>GET /skills</b>List installed skills.</div>
+      <div class="feat"><b>GET /skills/:name</b>Read skill content.</div>
+      <div class="feat"><b>PUT /skills/:name</b>Update skill content.</div>
+    </div>
+  </div>
+
+  <div class="box"><span class="box-label magenta">ADMIN://CLI</span>
+    <div class="three-col">
+      <div class="feat"><b>mio setup</b>Install MCP, skills, CLAUDE.md, statusline into Claude Code.</div>
+      <div class="feat"><b>mio uninstall</b>Remove all Mio integration. --purge to delete data too.</div>
+      <div class="feat"><b>mio serve [port]</b>Start this HTTP dashboard + API server.</div>
+      <div class="feat"><b>mio tui</b>Launch interactive terminal UI.</div>
+      <div class="feat"><b>mio mcp</b>Start MCP stdio server (used by Claude Code).</div>
+      <div class="feat"><b>mio sync</b>Export/import chunks for multi-device sync.</div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal -->
+<div class="modal-bg" id="modal" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <button class="xclose" onclick="closeModal()">x</button>
+    <h3 id="modal-title"></h3>
+    <div style="margin-bottom:16px;"><span class="obs-type" id="modal-type"></span><span id="modal-meta" style="font-size:11px;color:var(--text3);margin-left:10px;"></span></div>
+    <pre id="modal-content"></pre>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script>
+// === Markdown renderer config ===
+if (typeof marked !== 'undefined') {
+  marked.setOptions({ breaks: true, gfm: true });
+}
+function renderMd(text) {
+  if (typeof marked !== 'undefined') return marked.parse(text || '');
+  // Fallback: basic rendering
+  return (text||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/\n/g,'<br>');
+}
+
+// === Navigation ===
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('page-'+name).classList.add('active');
+  event.target.classList.add('active');
+}
+
+// === Search ===
+async function doSearch() {
+  const q = document.getElementById('search-input').value.trim();
+  if (!q) return;
+  const res = await fetch('/search?q='+encodeURIComponent(q)+'&limit=20');
+  const data = await res.json();
+  const el = document.getElementById('search-results');
+  if (!data || data.length===0) { el.innerHTML='<p style="color:var(--text3)">No results.</p>'; return; }
+  el.innerHTML='<div class="obs-list">'+data.map(o=>`
+    <div class="obs-card" onclick="showObs(${o.id})">
+      <span class="obs-type type-${o.type}">${o.type}</span>
+      <div class="obs-body"><div class="obs-title">${esc(o.title)}</div><div class="obs-preview">${esc((o.content||'').substring(0,200))}</div><div class="obs-meta">#${o.id} / score: ${(o.score||0).toFixed(2)}</div></div>
+    </div>`).join('')+'</div>';
+}
+
+// === Observation modal ===
+async function showObs(id) {
+  const o = await (await fetch('/observations/'+id)).json();
+  document.getElementById('modal-title').textContent=o.title;
+  const t=document.getElementById('modal-type'); t.textContent=o.type; t.className='obs-type type-'+o.type;
+  document.getElementById('modal-meta').textContent='#'+o.id+' / '+(o.project||'-')+' / '+o.created_at;
+  document.getElementById('modal-content').textContent=o.content;
+  document.getElementById('modal').classList.add('active');
+}
+function closeModal(){document.getElementById('modal').classList.remove('active');}
+
+// === Skills filter ===
+function filterSkills(cat) {
+  document.querySelectorAll('#skill-filters button').forEach(b=>b.classList.remove('active'));
+  event.target.classList.add('active');
+  document.querySelectorAll('#skills-list .skill-card').forEach(c=>{
+    c.style.display=(cat==='all'||c.dataset.cat===cat)?'':'none';
+  });
+}
+
+// === Skill editor ===
+let currentSkill = '';
+let currentContent = '';
+let currentTab = 'preview';
+
+async function loadSkill(name) {
+  document.querySelectorAll('#skills-list .skill-card').forEach(c=>c.classList.remove('selected'));
+  document.querySelector(`[data-name="${name}"]`)?.classList.add('selected');
+  const data = await (await fetch('/skills/'+name)).json();
+  if (data.error) { alert(data.error); return; }
+  currentSkill = name;
+  currentContent = data.content;
+  document.getElementById('editor-title').textContent = '/'+name;
+  document.getElementById('editor-path').textContent = data.path;
+  document.getElementById('editor-status').textContent = '';
+  document.getElementById('skill-editor').classList.add('visible');
+  document.getElementById('editor-placeholder').style.display = 'none';
+  updateEditorInfo();
+  setEditorTab(currentTab);
+}
+
+function setEditorTab(tab) {
+  currentTab = tab;
+  ['preview','edit','split'].forEach(t => {
+    document.getElementById('view-'+t).style.display = (t===tab) ? '' : 'none';
+    document.getElementById('tab-'+t).classList.toggle('active', t===tab);
+  });
+  if (tab === 'preview') {
+    document.getElementById('md-preview').innerHTML = renderMd(currentContent);
+  } else if (tab === 'edit') {
+    const ta = document.getElementById('editor-content');
+    ta.value = currentContent;
+    updateGutter('editor-gutter', currentContent);
+    ta.onscroll = () => syncScroll(ta, 'editor-gutter');
+  } else if (tab === 'split') {
+    const ta = document.getElementById('editor-content-split');
+    ta.value = currentContent;
+    document.getElementById('md-preview-split').innerHTML = renderMd(currentContent);
+    updateGutter('editor-gutter-split', currentContent);
+    ta.onscroll = () => syncScroll(ta, 'editor-gutter-split');
+  }
+}
+
+function onEditorInput() {
+  const ta = document.getElementById('editor-content');
+  currentContent = ta.value;
+  updateGutter('editor-gutter', currentContent);
+  updateEditorInfo();
+}
+
+function onSplitInput() {
+  const ta = document.getElementById('editor-content-split');
+  currentContent = ta.value;
+  document.getElementById('md-preview-split').innerHTML = renderMd(currentContent);
+  updateGutter('editor-gutter-split', currentContent);
+  updateEditorInfo();
+}
+
+function updateGutter(id, text) {
+  const lines = (text||'').split('\n').length;
+  const el = document.getElementById(id);
+  if (!el) return;
+  let html = '';
+  for (let i = 1; i <= lines; i++) html += i + '\n';
+  el.textContent = html;
+}
+
+function syncScroll(textarea, gutterId) {
+  const g = document.getElementById(gutterId);
+  if (g) g.scrollTop = textarea.scrollTop;
+}
+
+function updateEditorInfo() {
+  const lines = (currentContent||'').split('\n').length;
+  const words = (currentContent||'').trim().split(/\s+/).filter(Boolean).length;
+  document.getElementById('editor-info').textContent = lines+' lines / '+words+' words';
+}
+
+async function saveSkill() {
+  if (!currentSkill) return;
+  const btn=document.getElementById('btn-save-skill');
+  const st=document.getElementById('editor-status');
+  btn.disabled=true; st.textContent='saving...'; st.style.color='var(--yellow)';
+  try {
+    const res=await fetch('/skills/'+currentSkill,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:currentContent})});
+    const data=await res.json();
+    if(data.status==='saved'){st.textContent='saved!';st.style.color='var(--green)';} else {st.textContent='error: '+(data.error||'unknown');st.style.color='var(--red)';}
+  }catch(e){st.textContent='error: '+e.message;st.style.color='var(--red)';}
+  btn.disabled=false; setTimeout(()=>{st.textContent='';st.style.color='';},3000);
+}
+
+function closeEditor() {
+  currentSkill=''; currentContent='';
+  document.getElementById('skill-editor').classList.remove('visible');
+  document.getElementById('editor-placeholder').style.display='block';
+  document.querySelectorAll('#skills-list .skill-card').forEach(c=>c.classList.remove('selected'));
+}
+
+// Tab support in textareas
+document.addEventListener('keydown', function(e) {
+  if (e.key==='Tab' && e.target.tagName==='TEXTAREA' && e.target.closest('.skill-editor')) {
+    e.preventDefault();
+    const ta=e.target, s=ta.selectionStart, end=ta.selectionEnd;
+    ta.value = ta.value.substring(0,s)+'  '+ta.value.substring(end);
+    ta.selectionStart = ta.selectionEnd = s+2;
+    ta.dispatchEvent(new Event('input'));
+  }
+});
+
+// === Pipeline phase detail ===
+const phases = {
+  init: {title:'sdd-init',budget:'200 words',desc:'Detects project tech stack (package.json, go.mod, etc.), builds skill registry, and persists project context to Mio. Only runs once per project.',deps:'None',produces:'sdd-init/{project}'},
+  explore: {title:'sdd-explore',budget:'500 words',desc:'Investigates the codebase, reads real code, compares multiple approaches with pros/cons/complexity. Read-only — never modifies files.',deps:'sdd-init (optional)',produces:'sdd/{change}/explore'},
+  propose: {title:'sdd-propose',budget:'400 words',desc:'Creates formal proposal with intent, scope (in/out), approach, affected areas, risks with mitigation, rollback plan, and success criteria.',deps:'sdd/{change}/explore',produces:'sdd/{change}/proposal'},
+  spec: {title:'sdd-spec',budget:'650 words',desc:'Writes delta specifications — ADDED/MODIFIED/REMOVED requirements with Given/When/Then scenarios. Uses RFC 2119 keywords (MUST, SHALL, SHOULD, MAY).',deps:'sdd/{change}/proposal',produces:'sdd/{change}/spec'},
+  design: {title:'sdd-design',budget:'800 words',desc:'Technical design with architecture decisions (choice/alternatives/rationale), data flow diagrams, file changes table, interface contracts, testing strategy.',deps:'sdd/{change}/proposal + spec (if exists)',produces:'sdd/{change}/design'},
+  tasks: {title:'sdd-tasks',budget:'530 words',desc:'Breaks down into phased, numbered checklist. Each task is specific (file paths), actionable (single unit), verifiable (testable), and small (one session).',deps:'proposal + spec + design',produces:'sdd/{change}/tasks'},
+  apply: {title:'sdd-apply',budget:'—',desc:'Implements tasks by writing actual code. Supports TDD mode (RED → GREEN → REFACTOR) or standard mode. Marks tasks [x] as completed. Persists progress.',deps:'All prior artifacts',produces:'sdd/{change}/apply-progress'},
+  verify: {title:'sdd-verify',budget:'—',desc:'Quality gate. Runs real tests, builds project, creates spec compliance matrix (COMPLIANT/FAILING/UNTESTED per scenario). Only PASS with passing tests.',deps:'All artifacts + implementation',produces:'sdd/{change}/verify-report'},
+  archive: {title:'sdd-archive',budget:'—',desc:'Merges delta specs into main specs, creates audit trail with full artifact lineage (observation IDs). Never archives with CRITICAL issues.',deps:'verify-report (must PASS)',produces:'sdd/{change}/archive-report'}
+};
+
+function showPhase(name) {
+  document.querySelectorAll('.pipe-node').forEach(n=>n.classList.remove('selected'));
+  event.target.closest('.pipe-node')?.classList.add('selected');
+  const p=phases[name]; if(!p) return;
+  const el=document.getElementById('phase-detail');
+  el.innerHTML=`<h4>/`+p.title+`</h4><div class="detail-meta">Budget: <b>`+p.budget+`</b> | Produces: <code>`+p.produces+`</code></div><p style="margin-bottom:12px;">`+p.desc+`</p><div style="font-size:11px;color:var(--text3);">Dependencies: `+p.deps+`</div>`;
+  el.classList.add('visible');
+}
+
+// === Admin setup ===
+async function runSetup() {
+  const btn=document.getElementById('btn-setup'),out=document.getElementById('admin-output');
+  btn.disabled=true; btn.textContent='running...'; out.classList.add('visible'); out.textContent='> mio setup\n';
+  try {
+    const data=await(await fetch('/admin/setup',{method:'POST'})).json();
+    out.textContent+=data.output||'';
+    if(data.status==='ok'){out.textContent+='\n> Done.';btn.textContent='done!';setTimeout(()=>{btn.textContent='reinstall / update';btn.disabled=false;},3000);}
+    else{out.style.color='var(--red)';out.textContent+='\n> Error: '+(data.error||'');btn.textContent='failed';setTimeout(()=>{btn.textContent='reinstall / update';btn.disabled=false;out.style.color='';},3000);}
+  }catch(e){out.textContent+='\n> '+e.message;out.style.color='var(--red)';btn.textContent='reinstall / update';btn.disabled=false;}
+}
+
+// === Utils ===
+function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML;}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal();});
+</script>
+</body>
+</html>

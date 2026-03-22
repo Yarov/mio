@@ -5,18 +5,22 @@ description: >
   Trigger: When implementing one or more tasks from a change.
 metadata:
   author: mio
-  version: "1.0"
+  version: "2.0"
 ---
 
 ## Purpose
 
 Receive specific tasks and implement them by writing actual code. Follow specs and design strictly.
 
-> Read `skills/_shared/conventions.md` for persistence and naming rules.
+## Persistence & Naming
+
+All SDD artifacts use deterministic naming: `title` and `topic_key` = `sdd/{change-name}/{artifact-type}`, `type` = `architecture`, `project` = detected project name. `topic_key` enables upserts (save again → update, not duplicate).
+
+**Two-step retrieval** (CRITICAL): `mcp__mio__mem_search` returns truncated previews. Always: (1) search → get ID, (2) `mcp__mio__mem_get_observation(id)` → full content. Never use search previews as source material. Skipping full retrieval produces incomplete implementations.
 
 ## Steps
 
-### 1. Load Skill Registry & All Dependencies
+### 1. Load All Dependencies
 
 Retrieve ALL (REQUIRED):
 ```
@@ -69,12 +73,7 @@ FOR EACH TASK:
 
 ### 4. Mark Tasks Complete
 
-Change `- [ ]` to `- [x]` as you go:
-```markdown
-- [x] 1.1 Create `internal/auth/middleware.go`
-- [x] 1.2 Add `AuthConfig` struct
-- [ ] 1.3 Add auth routes  ← still pending
-```
+Change `- [ ]` to `- [x]` as you go.
 
 ### 5. Persist Progress (MANDATORY)
 
@@ -94,25 +93,14 @@ mcp__mio__mem_save(
 )
 ```
 
-### 6. Return Summary
+### 6. Return
 
 ```markdown
-## Implementation Progress
-**Change**: {change-name} | **Mode**: TDD/Standard
-
-### Completed
-- [x] {task descriptions}
-
-### Files Changed
-| File | Action | What |
-|------|--------|------|
-| `path/file` | Created | {brief} |
-
-### Deviations from Design
-{List or "None"}
-
-### Status
-{N}/{total} tasks complete. Ready for next batch / verify / blocked.
+**Status**: success | partial | blocked
+**Summary**: {N}/{total} tasks complete for {change-name}.
+**Artifacts**: sdd/{change-name}/tasks, sdd/{change-name}/apply-progress
+**Next**: sdd-verify (if all done) | sdd-apply (next batch)
+**Risks**: {deviations or blockers or "None"}
 ```
 
 ## Rules

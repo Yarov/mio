@@ -105,7 +105,7 @@ For evolving topics, use ` + "`topic_key`" + ` so updates replace instead of dup
 
 When a new decision supersedes an old one, use ` + "`mcp__mio__mem_relate`" + ` with type "supersedes". When fixing a bug caused by a prior decision, use "caused_by".
 
-### Mio Architect — Automatic SDD Pipeline
+### Mio Architect — Automatic SDD Pipeline (v2.0)
 
 When the user describes a **significant change** (new feature, refactor, complex bugfix), activate the ` + "`mio-architect`" + ` skill automatically:
 
@@ -120,13 +120,209 @@ When the user describes a **significant change** (new feature, refactor, complex
 - Questions about code
 - Running commands
 
-The architect assesses scope (small/medium/large) and drives the SDD pipeline: explore → propose → spec → design → tasks → apply → verify → archive. Each phase saves artifacts to Mio memory for cross-session recovery.`
+**Pipeline:** The architect assesses scope (small/medium/large) and drives the SDD pipeline. Each phase is delegated to a sub-agent with fresh context via the Agent tool — the orchestrator NEVER does real work directly.
+
+**Shortcuts:**
+- ` + "`/sdd-ff {description}`" + ` — Fast-forward through planning phases (explore → propose → spec → design → tasks), stop before implementation. Best for medium-scope changes.
+- ` + "`/sdd-continue`" + ` — Auto-detect pipeline state and execute the next phase. Works across sessions — recovers full state from Mio memory.
+- ` + "`/mio-architect {description}`" + ` — Full pipeline with user approval at each gate. Best for large changes.
+
+**Phases:** explore → propose → spec + design (parallel) → tasks → apply → verify → archive. Each phase saves artifacts to Mio memory for cross-session recovery.`
 
 // Markers to identify the Mio section in CLAUDE.md
 const (
 	mioSectionStart = "## Mio — Persistent Memory Protocol (ALWAYS ACTIVE)"
 	mioSectionEnd   = `Each phase saves artifacts to Mio memory for cross-session recovery.`
 )
+
+// UninstallClaudeCode removes all Mio integrations from Claude Code.
+// By default keeps ~/.mio/ data intact. Use purge=true to also delete data.
+func UninstallClaudeCode(purge bool) error {
+	fmt.Println("Uninstalling Mio from Claude Code...")
+
+	dir, err := claudeDir()
+	if err != nil {
+		return err
+	}
+
+	// 1. Remove MCP config
+	mcpConfig := filepath.Join(dir, "mcp", "mio.json")
+	if err := os.Remove(mcpConfig); err == nil {
+		fmt.Println("  [ok] Removed MCP config")
+	} else if !os.IsNotExist(err) {
+		fmt.Printf("  [warn] Could not remove MCP config: %v\n", err)
+	} else {
+		fmt.Println("  [skip] MCP config not found")
+	}
+
+	// 2. Remove tools from allowlist and statusline from settings.json
+	if err := removeFromSettings(dir); err != nil {
+		fmt.Printf("  [warn] Could not update settings.json: %v\n", err)
+	}
+
+	// 3. Remove Mio section from CLAUDE.md
+	if err := removeMemoryProtocol(dir); err != nil {
+		fmt.Printf("  [warn] Could not update CLAUDE.md: %v\n", err)
+	}
+
+	// 4. Remove statusline
+	statusline := filepath.Join(dir, "statusline.sh")
+	if err := os.Remove(statusline); err == nil {
+		fmt.Println("  [ok] Removed statusline.sh")
+	} else if !os.IsNotExist(err) {
+		fmt.Printf("  [warn] Could not remove statusline: %v\n", err)
+	}
+
+	// 5. Remove output style
+	outputStyle := filepath.Join(dir, "output-styles", "mio.md")
+	if err := os.Remove(outputStyle); err == nil {
+		fmt.Println("  [ok] Removed output style")
+	} else if !os.IsNotExist(err) {
+		fmt.Printf("  [warn] Could not remove output style: %v\n", err)
+	}
+
+	// 6. Remove skills
+	skillsDir := filepath.Join(dir, "skills")
+	if info, err := os.Stat(skillsDir); err == nil && info.IsDir() {
+		if err := os.RemoveAll(skillsDir); err == nil {
+			fmt.Println("  [ok] Removed all skills")
+		} else {
+			fmt.Printf("  [warn] Could not remove skills: %v\n", err)
+		}
+	}
+
+	// 7. Purge data if requested
+	if purge {
+		home, _ := os.UserHomeDir()
+		dataDir := filepath.Join(home, ".mio")
+		if info, err := os.Stat(dataDir); err == nil && info.IsDir() {
+			if err := os.RemoveAll(dataDir); err == nil {
+				fmt.Println("  [ok] Purged data directory (~/.mio)")
+			} else {
+				fmt.Printf("  [warn] Could not purge data: %v\n", err)
+			}
+		}
+	} else {
+		fmt.Println("  [info] Data directory (~/.mio) preserved. Use --purge to also delete data.")
+	}
+
+	fmt.Println("\nMio has been uninstalled. Restart Claude Code to complete.")
+	return nil
+}
+
+// removeFromSettings removes Mio tools from allowlist and statusline from settings.json
+func removeFromSettings(dir string) error {
+	settingsPath := filepath.Join(dir, "settings.json")
+
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Println("  [skip] settings.json not found")
+			return nil
+		}
+		return err
+	}
+
+	settings := make(map[string]interface{})
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return fmt.Errorf("parse settings.json: %w", err)
+	}
+
+	changed := false
+
+	// Remove tools from allowlist
+	if permissions, ok := settings["permissions"].(map[string]interface{}); ok {
+		if allowRaw, ok := permissions["allow"].([]interface{}); ok {
+			mioToolSet := make(map[string]bool)
+			for _, t := range mioTools {
+				mioToolSet[t] = true
+			}
+
+			var filtered []interface{}
+			for _, v := range allowRaw {
+				if s, ok := v.(string); ok && mioToolSet[s] {
+					continue
+				}
+				filtered = append(filtered, v)
+			}
+
+			if len(filtered) != len(allowRaw) {
+				permissions["allow"] = filtered
+				settings["permissions"] = permissions
+				changed = true
+				fmt.Printf("  [ok] Removed %d tools from allowlist\n", len(allowRaw)-len(filtered))
+			}
+		}
+	}
+
+	// Remove statusline
+	if sl, ok := settings["statusLine"].(map[string]interface{}); ok {
+		if cmd, _ := sl["command"].(string); strings.Contains(cmd, "statusline.sh") {
+			delete(settings, "statusLine")
+			changed = true
+			fmt.Println("  [ok] Removed statusline from settings.json")
+		}
+	}
+
+	if !changed {
+		fmt.Println("  [skip] No Mio entries in settings.json")
+		return nil
+	}
+
+	out, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(settingsPath, append(out, '\n'), 0644)
+}
+
+// removeMemoryProtocol removes the Mio section from CLAUDE.md
+func removeMemoryProtocol(dir string) error {
+	claudeMDPath := filepath.Join(dir, "CLAUDE.md")
+
+	data, err := os.ReadFile(claudeMDPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Println("  [skip] CLAUDE.md not found")
+			return nil
+		}
+		return err
+	}
+
+	content := string(data)
+	startIdx := strings.Index(content, mioSectionStart)
+	if startIdx < 0 {
+		fmt.Println("  [skip] Mio section not found in CLAUDE.md")
+		return nil
+	}
+
+	endIdx := strings.Index(content, mioSectionEnd)
+	if endIdx < 0 {
+		// Remove from start marker to end of file
+		content = strings.TrimRight(content[:startIdx], "\n")
+	} else {
+		endIdx += len(mioSectionEnd)
+		content = content[:startIdx] + strings.TrimLeft(content[endIdx:], "\n")
+	}
+
+	content = strings.TrimRight(content, "\n") + "\n"
+
+	// If file is now empty (only had Mio section), remove it
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" || trimmed == "# Global Instructions" {
+		if err := os.Remove(claudeMDPath); err == nil {
+			fmt.Println("  [ok] Removed CLAUDE.md (was Mio-only)")
+			return nil
+		}
+	}
+
+	if err := os.WriteFile(claudeMDPath, []byte(content), 0644); err != nil {
+		return err
+	}
+
+	fmt.Println("  [ok] Removed Mio section from CLAUDE.md")
+	return nil
+}
 
 // SetupClaudeCode configures Mio as an MCP server for Claude Code.
 func SetupClaudeCode() error {
@@ -247,11 +443,15 @@ func updateAllowlist() error {
 
 	settingsPath := filepath.Join(dir, "settings.json")
 
-	// Read existing settings
+	// Read existing settings (with recovery from corruption)
 	settings := make(map[string]interface{})
 	if data, err := os.ReadFile(settingsPath); err == nil {
 		if err := json.Unmarshal(data, &settings); err != nil {
-			return fmt.Errorf("parse settings.json: %w", err)
+			// Backup corrupted file and start fresh
+			backupPath := settingsPath + ".bak"
+			_ = os.WriteFile(backupPath, data, 0644)
+			fmt.Printf("  [warn] settings.json was corrupted, backed up to %s\n", backupPath)
+			settings = make(map[string]interface{})
 		}
 	}
 

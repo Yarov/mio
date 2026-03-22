@@ -5,19 +5,24 @@ description: >
   Trigger: When writing or updating the technical design for a change.
 metadata:
   author: mio
-  version: "1.0"
+  version: "2.0"
 ---
 
 ## Purpose
 
 Take proposal and specs, then produce a design document capturing HOW the change will be implemented.
 
-> Read `skills/_shared/conventions.md` for persistence and naming rules.
+## Persistence & Naming
+
+All SDD artifacts use deterministic naming: `title` and `topic_key` = `sdd/{change-name}/{artifact-type}`, `type` = `architecture`, `project` = detected project name. `topic_key` enables upserts (save again → update, not duplicate).
+
+**Two-step retrieval** (CRITICAL): `mcp__mio__mem_search` returns truncated previews. Always: (1) search → get ID, (2) `mcp__mio__mem_get_observation(id)` → full content. Never use search previews as source material.
 
 ## Steps
 
-### 1. Load Skill Registry & Dependencies
+### 1. Load Dependencies
 
+Retrieve in parallel:
 ```
 mcp__mio__mem_search(query: "sdd/{change-name}/proposal", project: "{project}") → get ID
 mcp__mio__mem_get_observation(id: {id}) → full proposal (REQUIRED)
@@ -85,15 +90,14 @@ mcp__mio__mem_save(
 )
 ```
 
-### 5. Return Summary
+### 5. Return
 
 ```markdown
-## Design Created
-**Change**: {change-name}
-- **Approach**: {one-line}
-- **Decisions**: {N documented}
-- **Files**: {N new, M modified, K deleted}
-**Next**: Ready for sdd-tasks.
+**Status**: success
+**Summary**: Design created for {change-name}. {N} decisions, {M} file changes.
+**Artifacts**: sdd/{change-name}/design
+**Next**: sdd-tasks
+**Risks**: {risks or "None"}
 ```
 
 ## Rules
@@ -103,3 +107,4 @@ mcp__mio__mem_save(
 - Use the project's ACTUAL patterns, not generic best practices
 - Include concrete file paths
 - If open questions BLOCK the design, say so clearly
+- Artifact budget: **800 words max**

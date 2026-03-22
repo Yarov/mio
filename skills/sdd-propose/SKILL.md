@@ -5,29 +5,32 @@ description: >
   Trigger: When creating or updating a proposal for a change.
 metadata:
   author: mio
-  version: "1.0"
+  version: "2.0"
 ---
 
 ## Purpose
 
 Take exploration analysis (or direct user input) and produce a structured proposal document.
 
-> Read `skills/_shared/conventions.md` for persistence and naming rules.
+## Persistence & Naming
+
+All SDD artifacts use deterministic naming: `title` and `topic_key` = `sdd/{change-name}/{artifact-type}`, `type` = `architecture`, `project` = detected project name. `topic_key` enables upserts (save again → update, not duplicate).
+
+**Two-step retrieval** (CRITICAL): `mcp__mio__mem_search` returns truncated previews. Always: (1) search → get ID, (2) `mcp__mio__mem_get_observation(id)` → full content. Never use search previews as source material.
 
 ## Steps
 
-### 1. Load Skill Registry
-
-Check for available coding skills. Load any matching your task.
-
-### 2. Retrieve Dependencies
+### 1. Load Context & Dependencies
 
 ```
 mcp__mio__mem_search(query: "sdd/{change-name}/explore", project: "{project}") → get ID (optional)
 → if found: mcp__mio__mem_get_observation(id) → full exploration
+
+mcp__mio__mem_search(query: "skill-registry", project: "{project}")
+→ if found: load matching coding skills
 ```
 
-### 3. Write Proposal
+### 2. Write Proposal
 
 ```markdown
 # Proposal: {Change Title}
@@ -64,7 +67,7 @@ mcp__mio__mem_search(query: "sdd/{change-name}/explore", project: "{project}") �
 - [ ] {How do we know this succeeded?}
 ```
 
-### 4. Persist (MANDATORY)
+### 3. Persist (MANDATORY)
 
 ```
 mcp__mio__mem_save(
@@ -78,15 +81,14 @@ mcp__mio__mem_save(
 
 If you skip this, sdd-spec CANNOT find your proposal and the pipeline BREAKS.
 
-### 5. Return Summary
+### 4. Return
 
 ```markdown
-## Proposal Created
-**Change**: {change-name}
-- **Intent**: {one-line}
-- **Scope**: {N deliverables}
-- **Risk Level**: Low/Medium/High
-**Next**: Ready for sdd-spec or sdd-design.
+**Status**: success
+**Summary**: Proposal created for {change-name}. {N} deliverables, {risk level} risk.
+**Artifacts**: sdd/{change-name}/proposal
+**Next**: sdd-spec and sdd-design (can run in parallel)
+**Risks**: {risks or "None"}
 ```
 
 ## Rules
@@ -95,3 +97,4 @@ If you skip this, sdd-spec CANNOT find your proposal and the pipeline BREAKS.
 - Every proposal MUST have success criteria
 - Use concrete file paths in Affected Areas
 - Keep it CONCISE — thinking tool, not a novel
+- Artifact budget: **400 words max**

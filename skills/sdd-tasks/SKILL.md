@@ -5,18 +5,22 @@ description: >
   Trigger: When creating the task breakdown for a change.
 metadata:
   author: mio
-  version: "1.0"
+  version: "2.0"
 ---
 
 ## Purpose
 
 Take proposal, specs, and design, then produce concrete, actionable implementation tasks organized by phase.
 
-> Read `skills/_shared/conventions.md` for persistence and naming rules.
+## Persistence & Naming
+
+All SDD artifacts use deterministic naming: `title` and `topic_key` = `sdd/{change-name}/{artifact-type}`, `type` = `architecture`, `project` = detected project name. `topic_key` enables upserts (save again → update, not duplicate).
+
+**Two-step retrieval** (CRITICAL): `mcp__mio__mem_search` returns truncated previews. Always: (1) search → get ID, (2) `mcp__mio__mem_get_observation(id)` → full content. Never use search previews as source material.
 
 ## Steps
 
-### 1. Load Skill Registry & Dependencies
+### 1. Load Dependencies
 
 Retrieve all three (REQUIRED):
 ```
@@ -47,7 +51,7 @@ design   → mcp__mio__mem_search + mcp__mio__mem_get_observation
 - [ ] 4.2 {Remove temporary code}
 ```
 
-### Task Rules
+### Task Quality
 
 | Criteria | Good | Bad |
 |----------|------|-----|
@@ -56,7 +60,7 @@ design   → mcp__mio__mem_search + mcp__mio__mem_get_observation
 | **Verifiable** | "Test: POST /login returns 401 without token" | "Make sure it works" |
 | **Small** | One file or one logical unit | "Implement the feature" |
 
-### Phase Guidelines
+### Phase Order
 
 ```
 Phase 1: Foundation — types, interfaces, config (things others depend on)
@@ -78,19 +82,14 @@ mcp__mio__mem_save(
 )
 ```
 
-### 4. Return Summary
+### 4. Return
 
 ```markdown
-## Tasks Created
-**Change**: {change-name}
-
-| Phase | Tasks | Focus |
-|-------|-------|-------|
-| Phase 1 | {N} | Foundation |
-| Phase 2 | {N} | Core |
-| Total | {N} | |
-
-**Next**: Ready for sdd-apply.
+**Status**: success
+**Summary**: {N} tasks in {M} phases for {change-name}.
+**Artifacts**: sdd/{change-name}/tasks
+**Next**: sdd-apply
+**Risks**: {risks or "None"}
 ```
 
 ## Rules
@@ -101,3 +100,4 @@ mcp__mio__mem_save(
 - Each task completable in ONE session
 - Use hierarchical numbering: 1.1, 1.2, 2.1
 - If project uses TDD, integrate RED → GREEN → REFACTOR tasks
+- Artifact budget: **530 words max**

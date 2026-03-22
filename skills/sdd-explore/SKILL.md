@@ -5,45 +5,47 @@ description: >
   Trigger: When you need to think through a feature, investigate the codebase, or clarify requirements.
 metadata:
   author: mio
-  version: "1.0"
+  version: "2.0"
 ---
 
 ## Purpose
 
 Investigate the codebase, think through problems, compare approaches, and return a structured analysis. Read-only — never modify code.
 
-> Read `skills/_shared/conventions.md` for persistence and naming rules.
+## Persistence & Naming
+
+All SDD artifacts use deterministic naming: `title` and `topic_key` = `sdd/{change-name}/{artifact-type}`, `type` = `architecture`, `project` = detected project name. `topic_key` enables upserts (save again → update, not duplicate).
+
+**Two-step retrieval** (CRITICAL): `mcp__mio__mem_search` returns truncated previews. Always: (1) search → get ID, (2) `mcp__mio__mem_get_observation(id)` → full content. Never use search previews as source material.
 
 ## Steps
 
-### 1. Load Skill Registry
-
-Check for available coding skills (see conventions.md). Load any matching your task.
-
-### 2. Load Project Context (optional)
+### 1. Load Context
 
 ```
 mcp__mio__mem_search(query: "sdd-init/{project}", project: "{project}")
 → if found: mcp__mio__mem_get_observation(id) → full context
+
+mcp__mio__mem_search(query: "skill-registry", project: "{project}")
+→ if found: load matching coding skills
 ```
 
-### 3. Investigate the Codebase
+### 2. Investigate the Codebase
 
 Read relevant code to understand:
 - Current architecture and patterns
 - Files and modules that would be affected
 - Existing behavior, tests, dependencies
 
-### 4. Analyze Options
+### 3. Analyze Options
 
 | Approach | Pros | Cons | Complexity |
 |----------|------|------|------------|
 | Option A | ... | ... | Low/Med/High |
 | Option B | ... | ... | Low/Med/High |
 
-### 5. Persist
+### 4. Persist
 
-If tied to a named change:
 ```
 mcp__mio__mem_save(
   title: "sdd/{change-name}/explore",
@@ -54,9 +56,15 @@ mcp__mio__mem_save(
 )
 ```
 
-### 6. Return
+### 5. Return
 
 ```markdown
+**Status**: success | partial | blocked
+**Summary**: {1-3 sentence summary}
+**Artifacts**: sdd/{change-name}/explore
+**Next**: sdd-propose
+**Risks**: {risks or "None"}
+
 ## Exploration: {topic}
 
 ### Current State
@@ -71,9 +79,6 @@ mcp__mio__mem_save(
 
 ### Recommendation
 {Recommended approach and why}
-
-### Risks
-- {Risk 1}
 ```
 
 ## Rules
@@ -81,3 +86,4 @@ mcp__mio__mem_save(
 - DO NOT modify any code or files
 - ALWAYS read real code, never guess
 - Keep analysis CONCISE
+- Artifact budget: **500 words max**

@@ -60,6 +60,8 @@ func main() {
 		runTUI(cfg)
 	case "setup":
 		runSetup(args)
+	case "uninstall":
+		runUninstall(args)
 	case "sync":
 		runSync(cfg, args)
 	case "version":
@@ -81,6 +83,7 @@ Usage: mio <command> [args]
 Commands:
   tui                  Launch interactive terminal UI
   setup [agent]        Configure Mio as MCP server (default: claude-code)
+  uninstall [--purge]  Remove Mio from Claude Code (--purge also deletes data)
   mcp                  Start MCP stdio server (for agent integration)
   serve [port]         Start HTTP API server (default: 7438)
   save <title> <content> [--type TYPE] [--project PROJECT]
@@ -122,6 +125,19 @@ func runTUI(cfg *config.Config) {
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "tui error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func runUninstall(args []string) {
+	purge := false
+	for _, a := range args {
+		if a == "--purge" {
+			purge = true
+		}
+	}
+	if err := setup.UninstallClaudeCode(purge); err != nil {
+		fmt.Fprintf(os.Stderr, "uninstall error: %v\n", err)
 		os.Exit(1)
 	}
 }
