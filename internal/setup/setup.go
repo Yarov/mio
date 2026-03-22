@@ -291,13 +291,17 @@ func updateAllowlist() error {
 		fmt.Println("  [ok] All tools already in allowlist")
 	}
 
-	// Configure statusline
+	// Configure statusline as object
 	statuslinePath := filepath.Join(dir, "statusline.sh")
-	currentStatusline, _ := settings["statusLine"].(string)
-	expectedStatusline := statuslinePath
+	statuslineConfig := map[string]interface{}{
+		"type":    "command",
+		"command": statuslinePath,
+	}
 	statuslineChanged := false
-	if currentStatusline != expectedStatusline {
-		settings["statusLine"] = expectedStatusline
+	currentSL, _ := settings["statusLine"].(map[string]interface{})
+	currentCmd, _ := currentSL["command"].(string)
+	if currentCmd != statuslinePath {
+		settings["statusLine"] = statuslineConfig
 		statuslineChanged = true
 		fmt.Println("  [ok] Statusline configured in settings.json")
 	}
