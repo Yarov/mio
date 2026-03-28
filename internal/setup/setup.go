@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -191,7 +192,10 @@ func UninstallClaudeCode(purge bool) error {
 		}
 	}
 
-	// 7. Purge data if requested
+	// 7. Remove launchd service
+	uninstallLaunchd()
+
+	// 8. Purge data if requested
 	if purge {
 		home, _ := os.UserHomeDir()
 		dataDir := filepath.Join(home, ".mio")
@@ -363,6 +367,11 @@ func SetupClaudeCode() error {
 	// 7. Install skills
 	if err := installSkills(binPath); err != nil {
 		fmt.Printf("  [warn] Could not install skills: %v\n", err)
+	}
+
+	// 8. Install launchd service for persistent HTTP dashboard
+	if err := installLaunchd(binPath); err != nil {
+		fmt.Printf("  [warn] Could not install launchd service: %v\n", err)
 	}
 
 	fmt.Println("\nMio is ready! Restart Claude Code to activate.")
@@ -720,6 +729,92 @@ func installSkills(binPath string) error {
 		fmt.Printf("  [ok] Installed %d skill files\n", installed)
 	}
 	return err
+}
+
+const launchdLabel = "com.mio.server"
+
+// installLaunchd creates a launchd plist so the HTTP dashboard starts on login and stays alive.
+func installLaunchd(binPath string) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+
+	agentsDir := filepath.Join(home, "Library", "LaunchAgents")
+	if err := os.MkdirAll(agentsDir, 0755); err != nil {
+		return err
+	}
+
+	plistPath := filepath.Join(agentsDir, launchdLabel+".plist")
+	logPath := filepath.Join(home, ".mio", "server.log")
+
+	plist := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>%s</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>%s</string>
+        <string>server</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>%s</string>
+    <key>StandardErrorPath</key>
+    <string>%s</string>
+</dict>
+</plist>
+`, launchdLabel, binPath, logPath, logPath)
+
+	// Check if already installed and identical
+	if existing, err := os.ReadFile(plistPath); err == nil {
+		if string(existing) == plist {
+			fmt.Println("  [ok] Launchd service already installed")
+			return nil
+		}
+	}
+
+	if err := os.WriteFile(plistPath, []byte(plist), 0644); err != nil {
+		return err
+	}
+
+	// Unload old version if any, then load new one
+	unloadCmd := exec.Command("launchctl", "unload", plistPath)
+	unloadCmd.Run() // ignore error — may not be loaded
+
+	loadCmd := exec.Command("launchctl", "load", plistPath)
+	if out, err := loadCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("launchctl load: %s (%w)", string(out), err)
+	}
+
+	fmt.Printf("  [ok] Launchd service installed (%s)\n", plistPath)
+	fmt.Println("  [ok] Dashboard will auto-start on login and stay alive")
+	return nil
+}
+
+// uninstallLaunchd removes the launchd plist.
+func uninstallLaunchd() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+
+	plistPath := filepath.Join(home, "Library", "LaunchAgents", launchdLabel+".plist")
+
+	// Unload first
+	unloadCmd := exec.Command("launchctl", "unload", plistPath)
+	unloadCmd.Run()
+
+	if err := os.Remove(plistPath); err == nil {
+		fmt.Println("  [ok] Removed launchd service")
+	} else if !os.IsNotExist(err) {
+		fmt.Printf("  [warn] Could not remove launchd plist: %v\n", err)
+	}
 }
 
 // findProjectFile looks for a file relative to the binary location

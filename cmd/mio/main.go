@@ -3,10 +3,13 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -164,18 +167,59 @@ func runMCP(cfg *config.Config) {
 	s := openStore(cfg)
 	defer s.Close()
 
-	// Start HTTP dashboard server in background (non-fatal if port is busy)
-	httpSrv := server.New(s, cfg)
-	go func() {
-		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			fmt.Fprintf(os.Stderr, "mio: dashboard on :%d unavailable: %v\n", cfg.HTTPPort, err)
-		}
-	}()
+	// Ensure HTTP dashboard is running as an independent process
+	ensureDashboard(cfg)
 
 	srv := mcp.New(s, cfg)
 	if err := srv.ServeStdio(); err != nil {
 		fmt.Fprintf(os.Stderr, "mcp error: %v\n", err)
 		os.Exit(1)
+	}
+}
+
+// ensureDashboard checks if the HTTP dashboard is already running.
+// If not, it spawns "mio server" as a detached process that outlives this MCP session.
+func ensureDashboard(cfg *config.Config) {
+	if server.IsRunning(cfg.HTTPPort) {
+		return
+	}
+
+	binPath, err := os.Executable()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mio: cannot find own binary: %v\n", err)
+		return
+	}
+
+	// Resolve symlinks to get the real path
+	if resolved, err := filepath.EvalSymlinks(binPath); err == nil {
+		binPath = resolved
+	}
+
+	cmd := exec.Command(binPath, "server", strconv.Itoa(cfg.HTTPPort))
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // detach from parent session
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	cmd.Stdin = nil
+
+	// Pass through data dir override if set
+	if dir := os.Getenv("MIO_DATA_DIR"); dir != "" {
+		cmd.Env = append(os.Environ(), "MIO_DATA_DIR="+dir)
+	}
+
+	if err := cmd.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "mio: failed to start dashboard: %v\n", err)
+		return
+	}
+
+	// Detach — don't wait for the child process
+	cmd.Process.Release()
+
+	// Give it a moment to bind, then verify
+	time.Sleep(500 * time.Millisecond)
+	if server.IsRunning(cfg.HTTPPort) {
+		fmt.Fprintf(os.Stderr, "mio: dashboard started on :%d (pid %d)\n", cfg.HTTPPort, cmd.Process.Pid)
+	} else {
+		fmt.Fprintf(os.Stderr, "mio: dashboard spawned but not responding on :%d\n", cfg.HTTPPort)
 	}
 }
 

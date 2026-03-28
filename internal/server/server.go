@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -32,7 +33,12 @@ func (s *HTTPServer) ListenAndServe() error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "Mio HTTP server listening on %s\n", addr)
+	// Write PID file so other processes can check if we're alive
+	pidPath := filepath.Join(s.cfg.DataDir, "server.pid")
+	os.MkdirAll(s.cfg.DataDir, 0755)
+	os.WriteFile(pidPath, []byte(strconv.Itoa(os.Getpid())), 0644)
+
+	fmt.Fprintf(os.Stderr, "Mio HTTP server listening on %s (pid %d)\n", addr, os.Getpid())
 	return http.Serve(ln, s.mux)
 }
 
@@ -341,6 +347,18 @@ func (s *HTTPServer) handleImport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "imported"})
+}
+
+// IsRunning checks if a Mio HTTP server is already responding on the given port.
+func IsRunning(port int) bool {
+	url := fmt.Sprintf("http://localhost:%d/health", port)
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
 }
 
 // --- Helpers ---
