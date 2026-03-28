@@ -38,15 +38,29 @@ Every time you start a new session with an AI coding agent, it starts from zero.
 
 ### Install
 
+**macOS / Linux** (recommended):
 ```bash
-# Clone and build
+curl -fsSL https://raw.githubusercontent.com/Yarov/mio/main/install.sh | sh
+```
+
+**Homebrew** (macOS / Linux):
+```bash
+brew install yarov/tap/mio
+```
+
+**Windows** (PowerShell):
+```powershell
+irm https://raw.githubusercontent.com/Yarov/mio/main/install.ps1 | iex
+```
+
+**From source** (requires Go 1.25+):
+```bash
 git clone https://github.com/Yarov/mio.git
 cd mio
 make install
-
-# Or build manually
-go build -o /usr/local/bin/mio ./cmd/mio
 ```
+
+**Manual download**: Grab a binary from [GitHub Releases](https://github.com/Yarov/mio/releases).
 
 ### Setup
 

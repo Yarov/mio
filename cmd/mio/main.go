@@ -23,7 +23,11 @@ import (
 	"mio/internal/tui"
 )
 
-const version = "0.1.0"
+// Set via ldflags at build time: -X main.version=... -X main.commit=...
+var (
+	version = "dev"
+	commit  = "none"
+)
 
 func main() {
 	if len(os.Args) < 2 {
@@ -70,7 +74,11 @@ func main() {
 	case "sync":
 		runSync(cfg, args)
 	case "version":
-		fmt.Printf("mio %s\n", version)
+		if commit != "none" {
+			fmt.Printf("mio %s (%s)\n", version, commit)
+		} else {
+			fmt.Printf("mio %s\n", version)
+		}
 	case "help", "--help", "-h":
 		printUsage()
 	default:
