@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -40,7 +41,7 @@ func main() {
 	switch cmd {
 	case "mcp":
 		runMCP(cfg)
-	case "serve":
+	case "server", "serve":
 		runServe(cfg, args)
 	case "save":
 		runSave(cfg, args)
@@ -85,7 +86,7 @@ Commands:
   setup [agent]        Configure Mio as MCP server (default: claude-code)
   uninstall [--purge]  Remove Mio from Claude Code (--purge also deletes data)
   mcp                  Start MCP stdio server (for agent integration)
-  serve [port]         Start HTTP API server (default: 7438)
+  server [port]        Start HTTP API + dashboard (default: 7438)
   save <title> <content> [--type TYPE] [--project PROJECT]
                        Save a memory directly
   search <query> [--project PROJECT] [--type TYPE] [--limit N]
@@ -162,6 +163,14 @@ func runSetup(args []string) {
 func runMCP(cfg *config.Config) {
 	s := openStore(cfg)
 	defer s.Close()
+
+	// Start HTTP dashboard server in background (non-fatal if port is busy)
+	httpSrv := server.New(s, cfg)
+	go func() {
+		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			fmt.Fprintf(os.Stderr, "mio: dashboard on :%d unavailable: %v\n", cfg.HTTPPort, err)
+		}
+	}()
 
 	srv := mcp.New(s, cfg)
 	if err := srv.ServeStdio(); err != nil {

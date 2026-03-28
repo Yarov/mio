@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 
@@ -26,8 +28,12 @@ func New(s *store.Store, cfg *config.Config) *HTTPServer {
 
 func (s *HTTPServer) ListenAndServe() error {
 	addr := fmt.Sprintf(":%d", s.cfg.HTTPPort)
-	fmt.Printf("Mio HTTP server listening on %s\n", addr)
-	return http.ListenAndServe(addr, s.mux)
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "Mio HTTP server listening on %s\n", addr)
+	return http.Serve(ln, s.mux)
 }
 
 func (s *HTTPServer) registerRoutes() {
