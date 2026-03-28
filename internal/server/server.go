@@ -48,6 +48,8 @@ func (s *HTTPServer) registerRoutes() {
 	s.mux.HandleFunc("GET /skills/{name}", s.handleSkillGet)
 	s.mux.HandleFunc("PUT /skills/{name}", s.handleSkillUpdate)
 	s.mux.HandleFunc("POST /admin/setup", s.handleAdminSetup)
+	s.mux.HandleFunc("POST /admin/uninstall", s.handleAdminUninstall)
+	s.mux.HandleFunc("GET /agents", s.handleAgents)
 	s.mux.HandleFunc("GET /health", s.handleHealth)
 	s.mux.HandleFunc("POST /observations", s.handleSave)
 	s.mux.HandleFunc("GET /observations/{id}", s.handleGet)

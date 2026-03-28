@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"mio/internal/agents"
 )
 
 //go:embed templates/*.html
@@ -179,6 +181,8 @@ func (s *HTTPServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		skillGroups[sk.Category] = append(skillGroups[sk.Category], sk)
 	}
 
+	agentStatuses := agents.StatusAll()
+
 	data := map[string]interface{}{
 		"Metrics":      metrics,
 		"Observations": recent,
@@ -186,6 +190,7 @@ func (s *HTTPServer) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		"Skills":       skills,
 		"SkillGroups":  skillGroups,
 		"SkillCount":   len(skills),
+		"Agents":       agentStatuses,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -255,17 +260,23 @@ func (s *HTTPServer) handleAdminSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	agentName := r.URL.Query().Get("agent")
+	if agentName == "" {
+		agentName = "claude-code"
+	}
+
 	exe, err := os.Executable()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "cannot find binary: "+err.Error())
 		return
 	}
 
-	cmd := exec.Command(exe, "setup")
+	cmd := exec.Command(exe, "setup", agentName)
 	output, err := cmd.CombinedOutput()
 
 	result := map[string]interface{}{
 		"output": string(output),
+		"agent":  agentName,
 	}
 	if err != nil {
 		result["status"] = "error"
@@ -277,6 +288,49 @@ func (s *HTTPServer) handleAdminSetup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result["status"] = "ok"
-	result["message"] = fmt.Sprintf("Setup completed. Restart Claude Code to activate changes.")
+	result["message"] = fmt.Sprintf("Setup completed for %s. Restart the agent to activate.", agentName)
 	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *HTTPServer) handleAdminUninstall(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "POST required")
+		return
+	}
+
+	agentName := r.URL.Query().Get("agent")
+	if agentName == "" {
+		writeError(w, http.StatusBadRequest, "agent parameter required")
+		return
+	}
+
+	exe, err := os.Executable()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "cannot find binary: "+err.Error())
+		return
+	}
+
+	cmd := exec.Command(exe, "uninstall", agentName)
+	output, err := cmd.CombinedOutput()
+
+	result := map[string]interface{}{
+		"output": string(output),
+		"agent":  agentName,
+	}
+	if err != nil {
+		result["status"] = "error"
+		result["error"] = err.Error()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(result)
+		return
+	}
+
+	result["status"] = "ok"
+	result["message"] = fmt.Sprintf("Uninstalled Mio from %s.", agentName)
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *HTTPServer) handleAgents(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, agents.StatusAll())
 }

@@ -554,6 +554,39 @@
     <div class="admin-out" id="admin-output"></div>
   </div>
 
+  <div class="box"><span class="box-label green">ADMIN://AGENTS</span>
+    <p style="font-size:12px;color:var(--text3);margin-bottom:16px;">Supported AI agents. Configure Mio for any agent with one click.</p>
+    <table style="width:100%;border-collapse:collapse;font-size:12px;">
+      <tr style="border-bottom:1px solid var(--border);color:var(--text3);">
+        <th style="text-align:left;padding:8px 12px;">Agent</th>
+        <th style="text-align:center;padding:8px 12px;">Installed</th>
+        <th style="text-align:center;padding:8px 12px;">Configured</th>
+        <th style="text-align:right;padding:8px 12px;">Action</th>
+      </tr>
+      {{range .Agents}}
+      <tr style="border-bottom:1px solid var(--border);" id="agent-row-{{.Name}}">
+        <td style="padding:8px 12px;color:var(--text);">{{.DisplayName}}</td>
+        <td style="text-align:center;padding:8px 12px;">
+          {{if .Installed}}<span style="color:var(--green);">yes</span>{{else}}<span style="color:var(--text3);">no</span>{{end}}
+        </td>
+        <td style="text-align:center;padding:8px 12px;">
+          {{if .Configured}}<span style="color:var(--cyan);">active</span>{{else}}<span style="color:var(--text3);">—</span>{{end}}
+        </td>
+        <td style="text-align:right;padding:8px 12px;">
+          {{if .Installed}}
+            {{if .Configured}}
+              <button class="btn" style="font-size:11px;padding:4px 10px;" onclick="agentAction('uninstall','{{.Name}}',this)">remove</button>
+            {{else}}
+              <button class="btn primary" style="font-size:11px;padding:4px 10px;" onclick="agentAction('setup','{{.Name}}',this)">setup</button>
+            {{end}}
+          {{end}}
+        </td>
+      </tr>
+      {{end}}
+    </table>
+    <div class="admin-out" id="agent-output"></div>
+  </div>
+
   <div class="box"><span class="box-label cyan">ADMIN://ENDPOINTS</span>
     <p style="font-size:12px;color:var(--text3);margin-bottom:16px;">HTTP API reference — all endpoints available on this server.</p>
     <div class="three-col">
@@ -575,13 +608,17 @@
       <div class="feat"><b>GET /skills</b>List installed skills.</div>
       <div class="feat"><b>GET /skills/:name</b>Read skill content.</div>
       <div class="feat"><b>PUT /skills/:name</b>Update skill content.</div>
+      <div class="feat"><b>GET /agents</b>List all agents and status.</div>
+      <div class="feat"><b>POST /admin/setup?agent=...</b>Setup Mio for agent.</div>
+      <div class="feat"><b>POST /admin/uninstall?agent=...</b>Remove Mio from agent.</div>
     </div>
   </div>
 
   <div class="box"><span class="box-label magenta">ADMIN://CLI</span>
     <div class="three-col">
-      <div class="feat"><b>mio setup</b>Install MCP, skills, CLAUDE.md, statusline into Claude Code.</div>
-      <div class="feat"><b>mio uninstall</b>Remove all Mio integration. --purge to delete data too.</div>
+      <div class="feat"><b>mio setup [agent]</b>Configure Mio for an agent (default: claude-code). --all for all detected.</div>
+      <div class="feat"><b>mio setup --list</b>Show all supported agents and their status.</div>
+      <div class="feat"><b>mio uninstall [agent]</b>Remove Mio from an agent. --all for all. --purge to delete data.</div>
       <div class="feat"><b>mio serve [port]</b>Start this HTTP dashboard + API server.</div>
       <div class="feat"><b>mio tui</b>Launch interactive terminal UI.</div>
       <div class="feat"><b>mio mcp</b>Start MCP stdio server (used by Claude Code).</div>
@@ -796,6 +833,31 @@ async function runSetup() {
     if(data.status==='ok'){out.textContent+='\n> Done.';btn.textContent='done!';setTimeout(()=>{btn.textContent='reinstall / update';btn.disabled=false;},3000);}
     else{out.style.color='var(--red)';out.textContent+='\n> Error: '+(data.error||'');btn.textContent='failed';setTimeout(()=>{btn.textContent='reinstall / update';btn.disabled=false;out.style.color='';},3000);}
   }catch(e){out.textContent+='\n> '+e.message;out.style.color='var(--red)';btn.textContent='reinstall / update';btn.disabled=false;}
+}
+
+// === Agent actions ===
+async function agentAction(action, name, btn) {
+  const out=document.getElementById('agent-output');
+  const origText=btn.textContent;
+  btn.disabled=true; btn.textContent='...';
+  out.classList.add('visible'); out.textContent='> mio '+action+' '+name+'\n';
+  try {
+    const url='/admin/'+action+'?agent='+encodeURIComponent(name);
+    const data=await(await fetch(url,{method:'POST'})).json();
+    out.textContent+=data.output||'';
+    if(data.status==='ok'){
+      out.textContent+='\n> Done.';
+      setTimeout(()=>window.location.reload(),1500);
+    } else {
+      out.style.color='var(--red)';
+      out.textContent+='\n> Error: '+(data.error||'');
+      btn.textContent=origText; btn.disabled=false;
+      setTimeout(()=>{out.style.color='';},3000);
+    }
+  } catch(e) {
+    out.textContent+='\n> '+e.message; out.style.color='var(--red)';
+    btn.textContent=origText; btn.disabled=false;
+  }
 }
 
 // === Utils ===

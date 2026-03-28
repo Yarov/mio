@@ -13,6 +13,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	_ "mio/internal/agents" // register all agents via init()
 	"mio/internal/config"
 	"mio/internal/mcp"
 	"mio/internal/server"
@@ -86,8 +87,12 @@ Usage: mio <command> [args]
 
 Commands:
   tui                  Launch interactive terminal UI
-  setup [agent]        Configure Mio as MCP server (default: claude-code)
-  uninstall [--purge]  Remove Mio from Claude Code (--purge also deletes data)
+  setup [agent]        Configure Mio for an agent (default: claude-code)
+  setup --all          Configure Mio for all detected agents
+  setup --list         Show all supported agents and status
+  uninstall [agent]    Remove Mio from an agent (default: claude-code)
+  uninstall --all      Remove Mio from all configured agents
+  uninstall --purge    Also delete data (~/.mio)
   mcp                  Start MCP stdio server (for agent integration)
   server [port]        Start HTTP API + dashboard (default: 7438)
   save <title> <content> [--type TYPE] [--project PROJECT]
@@ -107,6 +112,10 @@ Commands:
   sync --status        Show sync status
   version              Show version
   help                 Show this help
+
+Supported agents:
+  claude-code, cursor, gemini-cli, codex-cli, vscode-copilot,
+  opencode, continue-dev, kilo-code
 
 Environment:
   MIO_DATA_DIR         Data directory (default: ~/.mio)`)
@@ -135,30 +144,55 @@ func runTUI(cfg *config.Config) {
 
 func runUninstall(args []string) {
 	purge := false
+	all := false
+	agent := ""
+
 	for _, a := range args {
-		if a == "--purge" {
+		switch a {
+		case "--purge":
 			purge = true
+		case "--all":
+			all = true
+		default:
+			if !strings.HasPrefix(a, "-") {
+				agent = a
+			}
 		}
 	}
-	if err := setup.UninstallClaudeCode(purge); err != nil {
+
+	if all {
+		setup.UninstallAll(purge)
+		return
+	}
+
+	if agent == "" {
+		agent = "claude-code"
+	}
+	if err := setup.Uninstall(agent, purge); err != nil {
 		fmt.Fprintf(os.Stderr, "uninstall error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
 func runSetup(args []string) {
+	for _, a := range args {
+		if a == "--list" {
+			setup.ListAgents()
+			return
+		}
+		if a == "--all" {
+			setup.SetupAll()
+			return
+		}
+	}
+
 	agent := "claude-code"
-	if len(args) > 0 {
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		agent = args[0]
 	}
-	switch agent {
-	case "claude-code":
-		if err := setup.SetupClaudeCode(); err != nil {
-			fmt.Fprintf(os.Stderr, "setup error: %v\n", err)
-			os.Exit(1)
-		}
-	default:
-		fmt.Fprintf(os.Stderr, "unsupported agent: %s (supported: claude-code)\n", agent)
+
+	if err := setup.Setup(agent); err != nil {
+		fmt.Fprintf(os.Stderr, "setup error: %v\n", err)
 		os.Exit(1)
 	}
 }
