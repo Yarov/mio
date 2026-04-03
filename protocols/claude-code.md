@@ -49,7 +49,7 @@ Before starting work on anything that might have prior context:
 
 ### Session rhythm
 
-**Starting** — Call `mcp__mio__mem_context` to recover where you left off. This is how you avoid starting blind.
+**Starting** — Call `mcp__mio__mem_context` with `project` set to the current working directory's project name to recover where you left off. Always filter by project — the user asking "where did we leave off?" means *this* project, not all projects. This is how you avoid starting blind.
 
 **Closing** — Before wrapping up, call `mcp__mio__mem_session_end` with:
 ```

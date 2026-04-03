@@ -334,7 +334,16 @@ func (c *ClaudeCode) updateSettings(dir string) error {
 		PrintStep("ok", "Statusline configured in settings.json")
 	}
 
-	if added == 0 && !statuslineChanged {
+	// Configure output style
+	outputStyleChanged := false
+	currentOS, _ := settings["outputStyle"].(string)
+	if currentOS != "mio" {
+		settings["outputStyle"] = "mio"
+		outputStyleChanged = true
+		PrintStep("ok", "Output style set to 'mio' in settings.json")
+	}
+
+	if added == 0 && !statuslineChanged && !outputStyleChanged {
 		return nil
 	}
 
@@ -390,6 +399,12 @@ func (c *ClaudeCode) removeFromSettings(dir string) {
 			changed = true
 			PrintStep("ok", "Removed statusline from settings.json")
 		}
+	}
+
+	if os, ok := settings["outputStyle"].(string); ok && os == "mio" {
+		delete(settings, "outputStyle")
+		changed = true
+		PrintStep("ok", "Removed output style from settings.json")
 	}
 
 	if changed {

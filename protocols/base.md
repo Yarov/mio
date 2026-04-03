@@ -26,7 +26,7 @@ Call `mio.mem_search` or `mio.mem_context` when:
 
 ### SESSION START
 
-Call `mio.mem_context` at the beginning of every session to load recent memories.
+Call `mio.mem_context` with `project` set to the current project name at the beginning of every session. Always filter by project — context requests mean *this* project, not all projects.
 
 ### SESSION CLOSE
 

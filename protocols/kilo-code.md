@@ -26,7 +26,7 @@ Call `mio.mem_search` or `mio.mem_context` when:
 
 ### SESSION LIFECYCLE
 
-- **Start**: Call `mio.mem_context` to load recent memories
+- **Start**: Call `mio.mem_context` with `project` set to the current project name. Always filter by project — context requests mean *this* project, not all projects
 - **End**: Call `mio.mem_session_end` with summary (Goal, Accomplished, Discoveries, Next Steps, Files)
 
 ### Memory format

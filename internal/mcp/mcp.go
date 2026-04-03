@@ -356,15 +356,23 @@ func (s *Server) handleSearch(_ context.Context, request mcp.CallToolRequest) (*
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Found %d results:\n\n", len(results)))
-	for _, r := range results {
-		preview := truncate(r.Content, 300)
-		sb.WriteString(fmt.Sprintf("**#%d** [%s] %s (score: %.2f)\n", r.ID, r.Type, r.Title, r.Score))
-		sb.WriteString(fmt.Sprintf("  %s\n", preview))
+	sb.WriteString(fmt.Sprintf("# Search Results\n\n> **%d** matches found\n\n---\n\n", len(results)))
+	for i, r := range results {
+		topic := ""
 		if r.TopicKey != nil {
-			sb.WriteString(fmt.Sprintf("  topic: %s\n", *r.TopicKey))
+			topic = fmt.Sprintf(" `%s`", *r.TopicKey)
 		}
-		sb.WriteString(fmt.Sprintf("  created: %s | accessed: %d times\n\n", r.CreatedAt, r.AccessCount))
+		preview := truncate(r.Content, 300)
+		sb.WriteString(fmt.Sprintf("### #%d — %s\n\n", r.ID, r.Title))
+		sb.WriteString(fmt.Sprintf("| Type | Score | Accessed | Created |\n"))
+		sb.WriteString(fmt.Sprintf("|------|-------|----------|---------|\n"))
+		sb.WriteString(fmt.Sprintf("| `%s`%s | **%.2f** | %d times | %s |\n\n", r.Type, topic, r.Score, r.AccessCount, r.CreatedAt))
+		sb.WriteString(fmt.Sprintf("> %s\n", preview))
+		if i < len(results)-1 {
+			sb.WriteString("\n---\n\n")
+		} else {
+			sb.WriteString("\n")
+		}
 	}
 
 	return mcp.NewToolResultText(sb.String()), nil
@@ -427,10 +435,21 @@ func (s *Server) handleContext(_ context.Context, request mcp.CallToolRequest) (
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Recent context (%d observations):\n\n", len(obs)))
+	sb.WriteString(fmt.Sprintf("# Recent Context\n\n> **%d** observations\n\n---\n\n", len(obs)))
+	sb.WriteString("| # | Type | Title | Date |\n")
+	sb.WriteString("|---|------|-------|------|\n")
+	for _, o := range obs {
+		date := o.CreatedAt
+		if len(date) >= 10 {
+			date = date[:10]
+		}
+		sb.WriteString(fmt.Sprintf("| **%d** | `%s` | %s | %s |\n", o.ID, o.Type, o.Title, date))
+	}
+	sb.WriteString("\n---\n\n")
+	// Detail section with previews
 	for _, o := range obs {
 		preview := truncate(o.Content, 200)
-		sb.WriteString(fmt.Sprintf("**#%d** [%s] %s\n  %s\n  %s\n\n", o.ID, o.Type, o.Title, preview, o.CreatedAt))
+		sb.WriteString(fmt.Sprintf("**#%d** — %s\n> %s\n\n", o.ID, o.Title, preview))
 	}
 	return mcp.NewToolResultText(sb.String()), nil
 }
@@ -446,14 +465,20 @@ func (s *Server) handleTimeline(_ context.Context, request mcp.CallToolRequest) 
 	}
 
 	var sb strings.Builder
-	sb.WriteString("Timeline:\n\n")
+	sb.WriteString("# Timeline\n\n---\n\n")
 	for _, e := range entries {
-		marker := "  "
-		if e.IsFocus {
-			marker = "→ "
-		}
 		preview := truncate(e.Content, 150)
-		sb.WriteString(fmt.Sprintf("%s**#%d** [%s] %s\n    %s\n    %s\n\n", marker, e.ID, e.Type, e.Title, preview, e.CreatedAt))
+		date := e.CreatedAt
+		if len(date) >= 16 {
+			date = date[:16]
+		}
+		if e.IsFocus {
+			sb.WriteString(fmt.Sprintf("### >>> #%d — %s\n\n", e.ID, e.Title))
+			sb.WriteString(fmt.Sprintf("| Type | Date |\n|------|------|\n| `%s` | %s |\n\n", e.Type, date))
+			sb.WriteString(fmt.Sprintf("> **%s**\n\n", preview))
+		} else {
+			sb.WriteString(fmt.Sprintf("**#%d** `%s` %s — _%s_\n> %s\n\n", e.ID, e.Type, e.Title, date, preview))
+		}
 	}
 	return mcp.NewToolResultText(sb.String()), nil
 }
@@ -498,18 +523,32 @@ func (s *Server) handleSessionSummary(_ context.Context, request mcp.CallToolReq
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Recent sessions (%d):\n\n", len(sessions)))
+	sb.WriteString(fmt.Sprintf("# Sessions\n\n> **%d** recent sessions\n\n---\n\n", len(sessions)))
+	sb.WriteString("| Session | Status | Project | Memories | Started |\n")
+	sb.WriteString("|---------|--------|---------|----------|---------|\n")
 	for _, sess := range sessions {
 		status := "active"
 		if sess.EndedAt != nil {
 			status = "ended"
 		}
-		sb.WriteString(fmt.Sprintf("**%s** [%s] project=%s, observations=%d, started=%s\n",
-			sess.ID[:8], status, sess.Project, sess.ObservationCount, sess.StartedAt))
-		if sess.Summary != nil {
-			sb.WriteString(fmt.Sprintf("  summary: %s\n", truncate(*sess.Summary, 200)))
+		started := sess.StartedAt
+		if len(started) >= 10 {
+			started = started[:10]
 		}
-		sb.WriteString("\n")
+		sb.WriteString(fmt.Sprintf("| `%s` | **%s** | %s | %d | %s |\n",
+			sess.ID[:8], status, sess.Project, sess.ObservationCount, started))
+	}
+	sb.WriteString("\n---\n\n")
+	// Summaries section
+	hasSummaries := false
+	for _, sess := range sessions {
+		if sess.Summary != nil {
+			if !hasSummaries {
+				sb.WriteString("### Summaries\n\n")
+				hasSummaries = true
+			}
+			sb.WriteString(fmt.Sprintf("**`%s`** (%s)\n> %s\n\n", sess.ID[:8], sess.Project, truncate(*sess.Summary, 200)))
+		}
 	}
 	return mcp.NewToolResultText(sb.String()), nil
 }
@@ -541,7 +580,7 @@ func (s *Server) handleRelations(_ context.Context, request mcp.CallToolRequest)
 	rels, _ := s.store.GetRelations(id)
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Relations for #%d (%d found):\n\n", id, len(related)))
+	sb.WriteString(fmt.Sprintf("# Relations for #%d\n\n> **%d** connected memories\n\n---\n\n", id, len(related)))
 
 	relMap := map[int64]string{}
 	for _, r := range rels {
@@ -552,10 +591,16 @@ func (s *Server) handleRelations(_ context.Context, request mcp.CallToolRequest)
 		relMap[other] = r.Type
 	}
 
+	sb.WriteString("| Relation | # | Type | Title |\n")
+	sb.WriteString("|----------|---|------|-------|\n")
 	for _, o := range related {
 		relType := relMap[o.ID]
+		sb.WriteString(fmt.Sprintf("| `%s` | **%d** | `%s` | %s |\n", relType, o.ID, o.Type, o.Title))
+	}
+	sb.WriteString("\n---\n\n")
+	for _, o := range related {
 		preview := truncate(o.Content, 150)
-		sb.WriteString(fmt.Sprintf("  [%s] **#%d** [%s] %s\n    %s\n\n", relType, o.ID, o.Type, o.Title, preview))
+		sb.WriteString(fmt.Sprintf("**#%d** — %s\n> %s\n\n", o.ID, o.Title, preview))
 	}
 	return mcp.NewToolResultText(sb.String()), nil
 }
@@ -615,8 +660,26 @@ func (s *Server) handleStats(_ context.Context, _ mcp.CallToolRequest) (*mcp.Cal
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	data, _ := json.MarshalIndent(metrics, "", "  ")
-	return mcp.NewToolResultText(string(data)), nil
+	var sb strings.Builder
+	sb.WriteString("# Mio Stats\n\n---\n\n")
+	sb.WriteString("| Metric | Value |\n")
+	sb.WriteString("|--------|-------|\n")
+	sb.WriteString(fmt.Sprintf("| Observations | **%d** |\n", metrics.TotalObservations))
+	sb.WriteString(fmt.Sprintf("| Sessions | **%d** |\n", metrics.TotalSessions))
+	sb.WriteString(fmt.Sprintf("| Searches | **%d** |\n", metrics.TotalSearches))
+	sb.WriteString(fmt.Sprintf("| Search Hit Rate | **%.1f%%** |\n", metrics.SearchHitRate*100))
+	sb.WriteString(fmt.Sprintf("| Avg Search Latency | **%dms** |\n", metrics.AvgSearchLatencyMs))
+	sb.WriteString(fmt.Sprintf("| Stale Memories | **%d** |\n", metrics.StaleMemoryCount))
+	if len(metrics.TopProjects) > 0 {
+		sb.WriteString("\n---\n\n### Top Projects\n\n")
+		sb.WriteString("| Project | Memories |\n")
+		sb.WriteString("|---------|----------|\n")
+		for _, p := range metrics.TopProjects {
+			sb.WriteString(fmt.Sprintf("| `%s` | %d |\n", p.Project, p.Count))
+		}
+	}
+	sb.WriteString("\n")
+	return mcp.NewToolResultText(sb.String()), nil
 }
 
 // --- Innovation handlers ---
@@ -643,29 +706,43 @@ func (s *Server) handleSurface(_ context.Context, request mcp.CallToolRequest) (
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Surfaced %d relevant memories:\n\n", len(results)))
-	for _, r := range results {
+	sb.WriteString(fmt.Sprintf("# Surfaced Memories\n\n> **%d** relevant matches\n\n---\n\n", len(results)))
+	for i, r := range results {
 		preview := truncate(r.Content, 300)
-		sb.WriteString(fmt.Sprintf("**#%d** [%s] %s (relevance: %.2f)\n", r.ID, r.Type, r.Title, r.Score))
-		sb.WriteString(fmt.Sprintf("  %s\n", preview))
+		sb.WriteString(fmt.Sprintf("### #%d — %s\n\n", r.ID, r.Title))
+		sb.WriteString("| Type | Relevance |")
 		if r.Agent != "" {
-			sb.WriteString(fmt.Sprintf("  agent: %s\n", r.Agent))
+			sb.WriteString(" Agent |")
 		}
+		sb.WriteString("\n|------|-----------|")
+		if r.Agent != "" {
+			sb.WriteString("-------|")
+		}
+		sb.WriteString(fmt.Sprintf("\n| `%s` | **%.2f** |", r.Type, r.Score))
+		if r.Agent != "" {
+			sb.WriteString(fmt.Sprintf(" `%s` |", r.Agent))
+		}
+		sb.WriteString("\n\n")
+		sb.WriteString(fmt.Sprintf("> %s\n", preview))
 		// Show connected memories (relations)
 		if rels, err := s.store.GetRelations(r.ID); err == nil && len(rels) > 0 {
-			sb.WriteString("  related: ")
+			sb.WriteString("\n**Related:** ")
 			relStrs := make([]string, 0, len(rels))
 			for _, rel := range rels {
 				otherID := rel.ToID
 				if otherID == r.ID {
 					otherID = rel.FromID
 				}
-				relStrs = append(relStrs, fmt.Sprintf("#%d (%s)", otherID, rel.Type))
+				relStrs = append(relStrs, fmt.Sprintf("`#%d` (%s)", otherID, rel.Type))
 			}
-			sb.WriteString(strings.Join(relStrs, ", "))
+			sb.WriteString(strings.Join(relStrs, " · "))
 			sb.WriteString("\n")
 		}
-		sb.WriteString("\n")
+		if i < len(results)-1 {
+			sb.WriteString("\n---\n\n")
+		} else {
+			sb.WriteString("\n")
+		}
 	}
 	return mcp.NewToolResultText(sb.String()), nil
 }
@@ -684,15 +761,24 @@ func (s *Server) handleCrossProject(_ context.Context, request mcp.CallToolReque
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Cross-project results (%d):\n\n", len(results)))
+	sb.WriteString(fmt.Sprintf("# Cross-Project Search\n\n> **%d** results across projects\n\n---\n\n", len(results)))
+	sb.WriteString("| # | Project | Type | Score | Title |\n")
+	sb.WriteString("|---|---------|------|-------|-------|\n")
 	for _, r := range results {
-		project := "(none)"
+		project := "—"
 		if r.Project != nil {
 			project = *r.Project
 		}
+		sb.WriteString(fmt.Sprintf("| **%d** | `%s` | `%s` | %.2f | %s |\n", r.ID, project, r.Type, r.Score, r.Title))
+	}
+	sb.WriteString("\n---\n\n")
+	for _, r := range results {
 		preview := truncate(r.Content, 250)
-		sb.WriteString(fmt.Sprintf("**#%d** [%s] [%s] %s (score: %.2f, scope: %s)\n", r.ID, project, r.Type, r.Title, r.Score, r.Scope))
-		sb.WriteString(fmt.Sprintf("  %s\n\n", preview))
+		project := "—"
+		if r.Project != nil {
+			project = *r.Project
+		}
+		sb.WriteString(fmt.Sprintf("**#%d** [%s] — %s\n> %s\n\n", r.ID, project, r.Title, preview))
 	}
 	return mcp.NewToolResultText(sb.String()), nil
 }
@@ -747,15 +833,26 @@ func (s *Server) handleEnhancedSearch(_ context.Context, request mcp.CallToolReq
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Enhanced search — %d results:\n\n", len(results)))
-	for _, r := range results {
+	sb.WriteString(fmt.Sprintf("# Enhanced Search\n\n> **%d** results (TF-IDF ranked)\n\n---\n\n", len(results)))
+	for i, r := range results {
 		preview := truncate(r.Content, 300)
 		agent := ""
 		if r.Agent != "" {
-			agent = fmt.Sprintf(" [%s]", r.Agent)
+			agent = fmt.Sprintf(" | Agent: `%s`", r.Agent)
 		}
-		sb.WriteString(fmt.Sprintf("**#%d** [%s]%s %s (score: %.2f, rev: %d, scope: %s)\n", r.ID, r.Type, agent, r.Title, r.Score, r.RevisionCount, r.Scope))
-		sb.WriteString(fmt.Sprintf("  %s\n\n", preview))
+		sb.WriteString(fmt.Sprintf("### #%d — %s\n\n", r.ID, r.Title))
+		sb.WriteString("| Type | Score | Revisions | Scope |\n")
+		sb.WriteString("|------|-------|-----------|-------|\n")
+		sb.WriteString(fmt.Sprintf("| `%s` | **%.2f** | %d | `%s` |\n\n", r.Type, r.Score, r.RevisionCount, r.Scope))
+		if agent != "" {
+			sb.WriteString(fmt.Sprintf("> Agent: `%s`\n\n", r.Agent))
+		}
+		sb.WriteString(fmt.Sprintf("> %s\n", preview))
+		if i < len(results)-1 {
+			sb.WriteString("\n---\n\n")
+		} else {
+			sb.WriteString("\n")
+		}
 	}
 	return mcp.NewToolResultText(sb.String()), nil
 }
@@ -777,14 +874,20 @@ func (s *Server) handleAgentKnowledge(_ context.Context, request mcp.CallToolReq
 		}
 
 		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("Agent '%s' knowledge (%d memories):\n\n", agentName, len(results)))
+		sb.WriteString(fmt.Sprintf("# Agent Knowledge: `%s`\n\n> **%d** memories\n\n---\n\n", agentName, len(results)))
+		sb.WriteString("| # | Project | Type | Title |\n")
+		sb.WriteString("|---|---------|------|-------|\n")
 		for _, o := range results {
-			preview := truncate(o.Content, 200)
-			proj := "(none)"
+			proj := "—"
 			if o.Project != nil {
 				proj = *o.Project
 			}
-			sb.WriteString(fmt.Sprintf("**#%d** [%s] [%s] %s\n  %s\n\n", o.ID, proj, o.Type, o.Title, preview))
+			sb.WriteString(fmt.Sprintf("| **%d** | `%s` | `%s` | %s |\n", o.ID, proj, o.Type, o.Title))
+		}
+		sb.WriteString("\n---\n\n")
+		for _, o := range results {
+			preview := truncate(o.Content, 200)
+			sb.WriteString(fmt.Sprintf("**#%d** — %s\n> %s\n\n", o.ID, o.Title, preview))
 		}
 		return mcp.NewToolResultText(sb.String()), nil
 	}
@@ -800,17 +903,19 @@ func (s *Server) handleAgentKnowledge(_ context.Context, request mcp.CallToolReq
 	}
 
 	var sb strings.Builder
-	sb.WriteString("Agent contributions:\n\n")
+	sb.WriteString("# Agent Contributions\n\n---\n\n")
 	for agent, obs := range contributions {
 		name := agent
 		if name == "" {
 			name = "(unknown)"
 		}
-		sb.WriteString(fmt.Sprintf("**%s** — %d memories\n", name, len(obs)))
+		sb.WriteString(fmt.Sprintf("### `%s` — %d memories\n\n", name, len(obs)))
+		sb.WriteString("| # | Type | Title |\n")
+		sb.WriteString("|---|------|-------|\n")
 		for _, o := range obs {
-			sb.WriteString(fmt.Sprintf("  - #%d [%s] %s\n", o.ID, o.Type, o.Title))
+			sb.WriteString(fmt.Sprintf("| %d | `%s` | %s |\n", o.ID, o.Type, o.Title))
 		}
-		sb.WriteString("\n")
+		sb.WriteString("\n---\n\n")
 	}
 	return mcp.NewToolResultText(sb.String()), nil
 }
