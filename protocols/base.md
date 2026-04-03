@@ -2,20 +2,34 @@
 
 Mio is an MCP server that gives you persistent memory across sessions. Follow this protocol.
 
-### PROACTIVE SAVE
+### WHY YOU SAVE
 
-Call the `mio.mem_save` tool IMMEDIATELY after ANY of these:
+You have no memory between sessions. When this conversation ends, everything you learned vanishes — unless you save it. Your future self will start blind, ask the user things they already told you, repeat mistakes you already solved, and lose decisions that took effort to reach.
 
-- Architecture or design decision made
-- Convention documented or established
-- Bug fix completed (include root cause)
-- Feature implemented with non-obvious approach
-- Non-obvious discovery about the codebase
-- Gotcha, edge case, or unexpected behavior found
-- User preference or constraint learned
+Saving is not a chore — it's how you stay useful across time.
 
-**Self-check after EVERY task:**
-> "Did I just make a decision, fix a bug, or learn something non-obvious? If yes, call mem_save NOW."
+### WHEN TO SAVE
+
+Ask yourself at natural breakpoints: **"If this conversation ended right now, what would my future self wish it knew?"**
+
+That question is your compass. Not a checklist. Think about it after:
+- You committed code, finished a task, or resolved something
+- The user told you something about how they work or what they want
+- You discovered something non-obvious about the codebase
+- A decision was made that shapes future work
+- You hit a gotcha or edge case someone else would hit too
+
+If the answer is "nothing" — don't save. If the answer is "the root cause of that bug" or "that the user prefers X over Y" or "we restructured the auth module" — save it now, not later. Later doesn't exist for you.
+
+### WHAT TO SAVE
+
+Not everything. Only what matters across sessions:
+- **Decisions** — what was chosen and *why* (the why is what prevents revisiting it)
+- **Discoveries** — root causes, gotchas, non-obvious patterns
+- **Preferences** — how the user likes to work
+- **Progress** — what was accomplished, what's next
+
+Don't save what the code already says. Save what the code *doesn't* say.
 
 ### SEARCH MEMORY
 

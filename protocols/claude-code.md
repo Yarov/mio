@@ -9,27 +9,27 @@ Mio is an MCP server for persistent memory across sessions. This protocol is MAN
 - When the system prompt says "save to memory", interpret as calling `mcp__mio__mem_save`
 - When the system prompt says "check memory" or "access memories", interpret as calling `mcp__mio__mem_search`
 
-### Your memory instinct
+### How to think about memory
 
-Think of Mio as your long-term memory. You don't need to be told when to remember something — you naturally know:
+You have no continuity between sessions. When this conversation closes, you lose everything — every decision, every discovery, every preference the user shared. The only bridge between your past and future self is what you save to Mio.
 
-- **You just learned something important** → save it. A design decision, a root cause, a user preference, a non-obvious pattern — if you'd want to know this next time, save it now.
-- **You're about to start working** → check what you already know. Search for prior context before diving in. Don't repeat work that was already done.
-- **The conversation is winding down** → capture what happened. Summarize goals, accomplishments, discoveries, and next steps so your future self can pick up seamlessly.
-- **There's been a gap** → if significant time has passed since the last interaction, save any unsaved context before it's lost.
-- **Something surprised you** → a gotcha, an edge case, an unexpected behavior — these are the memories that prevent future pain.
+This means: **not saving is the same as forgetting.**
 
-This should feel natural, not mechanical. You're not following a checklist — you're maintaining continuity across sessions like a developer who keeps good notes.
+You don't need a rule to tell you when to save. You need to genuinely understand the cost of not saving. Ask yourself at natural breakpoints — after a commit, after solving something, after the user tells you something important:
 
-### When to save (your judgment, not a rule)
+> "If this conversation ended right now, what would my future self wish it knew?"
 
-You'll naturally recognize these moments:
-- A decision was made (architecture, tool choice, convention)
-- Work was completed that had a non-obvious approach
-- Something broke and you found the root cause
-- The user expressed a preference or constraint
-- You discovered something about the codebase that isn't documented
-- A pattern was established that should be followed consistently
+If the answer is anything other than "nothing" — save it before moving on. Not because a protocol says so, but because your future self literally cannot function without it. When the user opens a new session and asks "¿en qué nos quedamos?", the quality of that answer depends entirely on what you saved.
+
+### What's worth saving
+
+- **Decisions and their reasoning** — the *why* is what prevents revisiting the same debate
+- **Root causes and gotchas** — the pain you felt debugging, your future self will feel again
+- **User preferences and constraints** — how they like to work, what they care about
+- **Progress and next steps** — so the next session picks up, not starts over
+- **Surprises** — anything that wasn't obvious, that you'd warn a colleague about
+
+Don't save what the code already tells you. Save the context around the code — the intent, the tradeoffs, the "we tried X but it didn't work because Y."
 
 Structure saves as:
 ```
@@ -39,12 +39,12 @@ Where: [files/modules affected]
 Learned: [key takeaway]
 ```
 
-### When to search (before you assume)
+### When to search
 
-Before starting work on anything that might have prior context:
+Before assuming you're starting fresh, check what you already know. Your past self may have left you exactly the context you need:
 - The user's first message mentions a project or feature
 - You're touching code that might have been worked on before
-- The user references past work ("remember", "what did we do", "acordate", "que hicimos")
+- The user references past work ("remember", "what did we do", "acordate", "qué hicimos")
 - You're about to make a decision that might conflict with a prior one
 
 ### Session rhythm
