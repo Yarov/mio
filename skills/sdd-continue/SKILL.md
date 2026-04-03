@@ -84,6 +84,11 @@ If user confirms, loop back to step 2.
 - **Verify failed**: Show failing scenarios, offer to run sdd-apply for fixes
 - **Context reset**: This skill recovers full state from Mio — that's its superpower
 
+## Sub-Agent Scope (CRITICAL)
+You are a SUB-AGENT. Do NOT call these tools — they are top-level only:
+- mem_session_start, mem_session_end, mem_session_summary
+Use mem_save (once per task), mem_search, mem_context, mem_get_observation as needed.
+
 ## Rules
 
 - NEVER guess the state — always query Mio

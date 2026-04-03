@@ -30,6 +30,13 @@ var mioTools = []string{
 	"mcp__mio__mem_relate",
 	"mcp__mio__mem_suggest_topic_key",
 	"mcp__mio__mem_stats",
+	"mcp__mio__mem_surface",
+	"mcp__mio__mem_cross_project",
+	"mcp__mio__mem_consolidate",
+	"mcp__mio__mem_gc",
+	"mcp__mio__mem_graph",
+	"mcp__mio__mem_enhanced_search",
+	"mcp__mio__mem_agent_knowledge",
 }
 
 const launchdLabel = "com.mio.server"
@@ -97,7 +104,12 @@ func (c *ClaudeCode) Setup(binPath string) error {
 		PrintStep("warn", fmt.Sprintf("Skills: %v", err))
 	}
 
-	// 7. Install launchd
+	// 7. Install hooks
+	if err := c.installHooks(binPath, dir); err != nil {
+		PrintStep("warn", fmt.Sprintf("Hooks: %v", err))
+	}
+
+	// 8. Install launchd
 	if err := c.installLaunchd(binPath); err != nil {
 		PrintStep("warn", fmt.Sprintf("Launchd: %v", err))
 	}
@@ -139,7 +151,10 @@ func (c *ClaudeCode) Uninstall(purge bool) error {
 		PrintStep("ok", "Removed skills")
 	}
 
-	// 7. Remove launchd
+	// 7. Remove hooks from settings.json
+	c.removeHooksFromSettings(dir)
+
+	// 8. Remove launchd
 	c.uninstallLaunchd()
 
 	// 8. Purge data
@@ -160,14 +175,17 @@ func (c *ClaudeCode) Uninstall(purge bool) error {
 // --- Claude Code specific helpers ---
 
 func (c *ClaudeCode) loadProtocol(binPath string) string {
-	// Try to load from protocols/ directory
+	// Primary: read from embedded assets (always available in compiled binary)
+	if content, ok := ReadEmbeddedFile("protocols/claude-code.md"); ok {
+		return content
+	}
+	// Fallback: try filesystem (development mode)
 	src := FindProjectFile(binPath, "protocols/claude-code.md")
 	if src != "" {
 		if data, err := os.ReadFile(src); err == nil {
 			return string(data)
 		}
 	}
-	// Fallback: embedded minimal protocol
 	return "## Mio — Persistent Memory Protocol\n\nMio is an MCP server for persistent memory. Use mcp__mio__mem_save, mcp__mio__mem_search, mcp__mio__mem_context.\n"
 }
 
@@ -381,54 +399,53 @@ func (c *ClaudeCode) removeFromSettings(dir string) {
 }
 
 func (c *ClaudeCode) installStatusline(binPath, dir string) error {
+	destPath := filepath.Join(dir, "statusline.sh")
+
+	// Primary: embedded assets
+	if err := InstallEmbeddedFile("statusline.sh", destPath, 0755); err == nil {
+		PrintStep("ok", fmt.Sprintf("Statusline → %s", destPath))
+		return nil
+	}
+
+	// Fallback: filesystem (development mode)
 	srcPath := FindProjectFile(binPath, "statusline.sh")
 	if srcPath == "" {
 		return fmt.Errorf("statusline.sh not found")
 	}
 
-	destPath := filepath.Join(dir, "statusline.sh")
+	data, err := os.ReadFile(srcPath)
+	if err != nil {
+		return err
+	}
 
 	if existing, err := os.ReadFile(destPath); err == nil {
-		newData, err := os.ReadFile(srcPath)
-		if err == nil && string(existing) == string(newData) {
+		if string(existing) == string(data) {
 			PrintStep("ok", "Statusline already installed")
 			return nil
 		}
 	}
 
-	data, err := os.ReadFile(srcPath)
-	if err != nil {
-		return err
-	}
-
 	if err := os.WriteFile(destPath, data, 0755); err != nil {
 		return err
 	}
-
 	PrintStep("ok", fmt.Sprintf("Statusline → %s", destPath))
 	return nil
 }
 
 func (c *ClaudeCode) installOutputStyle(binPath, dir string) error {
-	srcPath := FindProjectFile(binPath, "output-styles/mio.md")
-	if srcPath == "" {
-		PrintStep("skip", "Output style not found in project")
+	destPath := filepath.Join(dir, "output-styles", "mio.md")
+
+	// Primary: embedded assets
+	if err := InstallEmbeddedFile("output-styles/mio.md", destPath, 0644); err == nil {
+		PrintStep("ok", fmt.Sprintf("Output style → %s", destPath))
 		return nil
 	}
 
-	stylesDir := filepath.Join(dir, "output-styles")
-	if err := os.MkdirAll(stylesDir, 0755); err != nil {
-		return err
-	}
-
-	destPath := filepath.Join(stylesDir, "mio.md")
-
-	if existing, err := os.ReadFile(destPath); err == nil {
-		newData, _ := os.ReadFile(srcPath)
-		if string(existing) == string(newData) {
-			PrintStep("ok", "Output style already installed")
-			return nil
-		}
+	// Fallback: filesystem (development mode)
+	srcPath := FindProjectFile(binPath, "output-styles/mio.md")
+	if srcPath == "" {
+		PrintStep("skip", "Output style not found")
+		return nil
 	}
 
 	data, err := os.ReadFile(srcPath)
@@ -436,28 +453,51 @@ func (c *ClaudeCode) installOutputStyle(binPath, dir string) error {
 		return err
 	}
 
-	if err := os.WriteFile(destPath, data, 0644); err != nil {
+	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
 		return err
 	}
 
+	if existing, err := os.ReadFile(destPath); err == nil {
+		if string(existing) == string(data) {
+			PrintStep("ok", "Output style already installed")
+			return nil
+		}
+	}
+
+	if err := os.WriteFile(destPath, data, 0644); err != nil {
+		return err
+	}
 	PrintStep("ok", fmt.Sprintf("Output style → %s", destPath))
 	return nil
 }
 
 func (c *ClaudeCode) installSkills(binPath, dir string) error {
+	destDir := filepath.Join(dir, "skills")
+
+	// Primary: embedded assets
+	installed, err := InstallEmbeddedDir("skills", destDir)
+	if err == nil && installed >= 0 {
+		if installed == 0 {
+			PrintStep("ok", "Skills already up to date")
+		} else {
+			PrintStep("ok", fmt.Sprintf("Installed %d skill files", installed))
+		}
+		return nil
+	}
+
+	// Fallback: filesystem (development mode)
 	srcDir := FindProjectFile(binPath, "skills")
 	if srcDir == "" {
 		PrintStep("skip", "No skills directory found")
 		return nil
 	}
 
-	info, err := os.Stat(srcDir)
-	if err != nil || !info.IsDir() {
+	info, statErr := os.Stat(srcDir)
+	if statErr != nil || !info.IsDir() {
 		return nil
 	}
 
-	destDir := filepath.Join(dir, "skills")
-	installed, err := CopySkills(srcDir, destDir)
+	installed, err = CopySkills(srcDir, destDir)
 	if err != nil {
 		return err
 	}
@@ -467,6 +507,109 @@ func (c *ClaudeCode) installSkills(binPath, dir string) error {
 	} else {
 		PrintStep("ok", fmt.Sprintf("Installed %d skill files", installed))
 	}
+	return nil
+}
+
+func (c *ClaudeCode) installHooks(binPath, dir string) error {
+	// Copy hook scripts to ~/.mio/hooks/
+	mioHooksDir := filepath.Join(HomeDir(), ".mio", "hooks")
+	if err := os.MkdirAll(mioHooksDir, 0755); err != nil {
+		return err
+	}
+
+	hookFiles := []string{"user-prompt-submit.sh"}
+	installed := 0
+	for _, hookFile := range hookFiles {
+		destPath := filepath.Join(mioHooksDir, hookFile)
+
+		// Primary: embedded assets
+		if err := InstallEmbeddedFile("hooks/"+hookFile, destPath, 0755); err == nil {
+			installed++
+			continue
+		}
+
+		// Fallback: filesystem (development mode)
+		srcDir := FindProjectFile(binPath, "hooks")
+		if srcDir == "" {
+			continue
+		}
+		srcPath := filepath.Join(srcDir, hookFile)
+		srcData, err := os.ReadFile(srcPath)
+		if err != nil {
+			continue
+		}
+
+		if existing, err := os.ReadFile(destPath); err == nil && string(existing) == string(srcData) {
+			continue
+		}
+
+		if err := os.WriteFile(destPath, srcData, 0755); err != nil {
+			return err
+		}
+		installed++
+	}
+
+	if installed > 0 {
+		PrintStep("ok", fmt.Sprintf("Installed %d hook scripts → %s", installed, mioHooksDir))
+	} else {
+		PrintStep("ok", "Hooks already up to date")
+	}
+
+	// Configure hooks in settings.json
+	settingsPath := filepath.Join(dir, "settings.json")
+	settings := make(map[string]interface{})
+	if data, err := os.ReadFile(settingsPath); err == nil {
+		json.Unmarshal(data, &settings)
+	}
+
+	hooks, _ := settings["hooks"].(map[string]interface{})
+	if hooks == nil {
+		hooks = make(map[string]interface{})
+	}
+
+	hookPath := filepath.Join(mioHooksDir, "user-prompt-submit.sh")
+
+	// Claude Code hook format: {"matcher": "", "hooks": [{"type": "command", "command": "..."}]}
+	mioHookEntry := map[string]interface{}{
+		"matcher": "",
+		"hooks": []interface{}{
+			map[string]interface{}{
+				"type":    "command",
+				"command": hookPath,
+			},
+		},
+	}
+
+	// Check if already configured
+	if existing, ok := hooks["UserPromptSubmit"].([]interface{}); ok {
+		for _, h := range existing {
+			if hm, ok := h.(map[string]interface{}); ok {
+				if hooksArr, ok := hm["hooks"].([]interface{}); ok {
+					for _, hk := range hooksArr {
+						if hkm, ok := hk.(map[string]interface{}); ok {
+							if cmd, _ := hkm["command"].(string); cmd == hookPath {
+								return nil // Already configured
+							}
+						}
+					}
+				}
+			}
+		}
+		// Append to existing hooks
+		hooks["UserPromptSubmit"] = append(existing, mioHookEntry)
+	} else {
+		hooks["UserPromptSubmit"] = []interface{}{mioHookEntry}
+	}
+
+	settings["hooks"] = hooks
+	data, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(settingsPath, append(data, '\n'), 0644); err != nil {
+		return err
+	}
+	PrintStep("ok", "UserPromptSubmit hook configured in settings.json")
 	return nil
 }
 
@@ -525,6 +668,72 @@ func (c *ClaudeCode) installLaunchd(binPath string) error {
 	PrintStep("ok", fmt.Sprintf("Launchd service → %s", plistPath))
 	PrintStep("ok", "Dashboard will auto-start on login and stay alive")
 	return nil
+}
+
+func (c *ClaudeCode) removeHooksFromSettings(dir string) {
+	settingsPath := filepath.Join(dir, "settings.json")
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		return
+	}
+
+	settings := make(map[string]interface{})
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return
+	}
+
+	hooks, ok := settings["hooks"].(map[string]interface{})
+	if !ok {
+		return
+	}
+
+	mioHooksDir := filepath.Join(HomeDir(), ".mio", "hooks")
+	changed := false
+
+	if upsHooks, ok := hooks["UserPromptSubmit"].([]interface{}); ok {
+		var filtered []interface{}
+		for _, h := range upsHooks {
+			if hm, ok := h.(map[string]interface{}); ok {
+				isMio := false
+				// New format: check inside hooks array
+				if hooksArr, ok := hm["hooks"].([]interface{}); ok {
+					for _, hk := range hooksArr {
+						if hkm, ok := hk.(map[string]interface{}); ok {
+							if cmd, _ := hkm["command"].(string); strings.HasPrefix(cmd, mioHooksDir) {
+								isMio = true
+							}
+						}
+					}
+				}
+				// Legacy format: check command directly
+				if cmd, _ := hm["command"].(string); strings.HasPrefix(cmd, mioHooksDir) {
+					isMio = true
+				}
+				if isMio {
+					changed = true
+					continue
+				}
+			}
+			filtered = append(filtered, h)
+		}
+		if len(filtered) == 0 {
+			delete(hooks, "UserPromptSubmit")
+		} else {
+			hooks["UserPromptSubmit"] = filtered
+		}
+	}
+
+	if len(hooks) == 0 {
+		delete(settings, "hooks")
+	} else {
+		settings["hooks"] = hooks
+	}
+
+	if changed {
+		out, _ := json.MarshalIndent(settings, "", "  ")
+		os.WriteFile(settingsPath, append(out, '\n'), 0644)
+		PrintStep("ok", "Removed hooks from settings.json")
+	}
 }
 
 func (c *ClaudeCode) uninstallLaunchd() {

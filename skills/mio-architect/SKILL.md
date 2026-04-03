@@ -126,10 +126,21 @@ Working directory: {path}
 ## Pre-Resolved Skills
 {List of coding skills and their paths from the registry}
 
-## Persistence
-Use Mio MCP tools. Artifact naming: title and topic_key = "sdd/{change-name}/{artifact-type}", type = "architecture", project = "{project}".
+## Persistence — Mio MCP Tools
+You have FULL ACCESS to Mio MCP tools — they are globally allowed in the settings. Call them directly:
+- mcp__mio__mem_save — save your artifacts and discoveries
+- mcp__mio__mem_search — find prior context and artifacts
+- mcp__mio__mem_context — load recent memories
+- mcp__mio__mem_get_observation — fetch full content by ID
+
+Artifact naming: title and topic_key = "sdd/{change-name}/{artifact-type}", type = "architecture", project = "{project}".
 
 Two-step retrieval (CRITICAL): mcp__mio__mem_search returns truncated previews. Always: (1) search → get ID, (2) mcp__mio__mem_get_observation(id) → full content.
+
+## Sub-Agent Scope (CRITICAL)
+You are a SUB-AGENT. Do NOT call these session lifecycle tools — they are top-level only:
+- mcp__mio__mem_session_start, mcp__mio__mem_session_end, mcp__mio__mem_session_summary
+All other Mio tools (mem_save, mem_search, mem_context, mem_get_observation) are available and encouraged.
 
 ## Dependencies to Retrieve
 {List which artifacts the sub-agent needs to fetch from Mio}

@@ -27,9 +27,6 @@ func TestDefault(t *testing.T) {
 	if cfg.HTTPPort != 7438 {
 		t.Errorf("HTTPPort = %d, want 7438", cfg.HTTPPort)
 	}
-	if cfg.EnableVectorSearch {
-		t.Error("EnableVectorSearch should be false by default")
-	}
 	if cfg.DedupeWindow <= 0 {
 		t.Error("DedupeWindow should be positive")
 	}

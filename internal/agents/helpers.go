@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	mio "mio"
 )
 
 const (
@@ -342,6 +344,129 @@ func FindProjectFile(binPath, relPath string) string {
 		}
 	}
 	return ""
+}
+
+// WriteIfChanged writes data to path only if the content has changed.
+func WriteIfChanged(path string, data []byte) error {
+	if existing, err := os.ReadFile(path); err == nil {
+		if string(existing) == string(data) {
+			return nil
+		}
+	}
+	return os.WriteFile(path, data, 0644)
+}
+
+// --- Embedded asset installation helpers ---
+// These try embedded assets first (compiled binary), then fall back to
+// filesystem lookup (development mode with FindProjectFile).
+
+// InstallSkillsFromAssets installs skills, preferring embedded assets.
+func InstallSkillsFromAssets(binPath, destDir string) (int, error) {
+	// Primary: embedded assets
+	if n, err := InstallEmbeddedDir("skills", destDir); err == nil {
+		return n, nil
+	}
+	// Fallback: filesystem
+	srcDir := FindProjectFile(binPath, "skills")
+	if srcDir == "" {
+		return 0, fmt.Errorf("skills not found")
+	}
+	info, err := os.Stat(srcDir)
+	if err != nil || !info.IsDir() {
+		return 0, fmt.Errorf("skills directory invalid")
+	}
+	return CopySkills(srcDir, destDir)
+}
+
+// InstallProtocolFromAssets installs a protocol file, preferring embedded assets.
+// embeddedPath is like "protocols/cursor.md", destPath is the final destination.
+func InstallProtocolFromAssets(binPath, embeddedPath, destPath string) error {
+	// Primary: embedded assets
+	if content, ok := ReadEmbeddedFile(embeddedPath); ok {
+		return InstallProtocol(destPath, content)
+	}
+	// Fallback: filesystem
+	srcPath := FindProjectFile(binPath, embeddedPath)
+	if srcPath == "" {
+		return fmt.Errorf("%s not found", embeddedPath)
+	}
+	data, err := os.ReadFile(srcPath)
+	if err != nil {
+		return err
+	}
+	return InstallProtocol(destPath, string(data))
+}
+
+// ReadEmbeddedFile reads a file from the embedded assets.
+// Returns the content and true if found, empty string and false otherwise.
+func ReadEmbeddedFile(path string) (string, bool) {
+	data, err := mio.Assets.ReadFile(path)
+	if err != nil {
+		return "", false
+	}
+	return string(data), true
+}
+
+// InstallEmbeddedFile copies an embedded file to a destination path.
+// Skips if content is identical. Sets the given file mode.
+func InstallEmbeddedFile(embeddedPath, destPath string, mode os.FileMode) error {
+	data, err := mio.Assets.ReadFile(embeddedPath)
+	if err != nil {
+		return fmt.Errorf("embedded file %s not found: %w", embeddedPath, err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+		return err
+	}
+
+	if existing, err := os.ReadFile(destPath); err == nil {
+		if string(existing) == string(data) {
+			return nil // already identical
+		}
+	}
+
+	return os.WriteFile(destPath, data, mode)
+}
+
+// InstallEmbeddedDir copies an embedded directory tree to a destination.
+// Returns the number of files installed (skipping identical ones).
+func InstallEmbeddedDir(embeddedDir, destDir string) (int, error) {
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		return 0, err
+	}
+
+	installed := 0
+	err := fs.WalkDir(mio.Assets, embeddedDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+
+		relPath, _ := filepath.Rel(embeddedDir, path)
+		destPath := filepath.Join(destDir, relPath)
+
+		if d.IsDir() {
+			return os.MkdirAll(destPath, 0755)
+		}
+
+		srcData, err := mio.Assets.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+
+		if existing, err := os.ReadFile(destPath); err == nil {
+			if string(existing) == string(srcData) {
+				return nil
+			}
+		}
+
+		if err := os.WriteFile(destPath, srcData, 0644); err != nil {
+			return nil
+		}
+		installed++
+		return nil
+	})
+
+	return installed, err
 }
 
 // PrintStep prints a formatted setup/uninstall step.

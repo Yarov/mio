@@ -39,6 +39,16 @@ func (s *Server) ServeStdio() error {
 }
 
 func (s *Server) registerTools() {
+	// Tool loading strategy:
+	// EAGER (always in context): mem_save, mem_search, mem_get_observation, mem_context, mem_session_summary
+	//   → Core tools needed every session
+	// DEFERRED (loaded on-demand via ToolSearch): mem_update, mem_delete, mem_timeline,
+	//   mem_session_start, mem_session_end, mem_save_prompt, mem_relations, mem_relate,
+	//   mem_suggest_topic_key, mem_stats
+	//   → Rarely used tools, ~40% token reduction at session startup
+
+	// --- Eager tools (always available) ---
+
 	// mem_save
 	s.mcp.AddTool(
 		mcp.NewTool("mem_save",
@@ -51,6 +61,7 @@ func (s *Server) registerTools() {
 			mcp.WithString("scope", mcp.Description("Scope: project, personal, or global")),
 			mcp.WithString("topic_key", mcp.Description("Stable key for evolving topics (enables upsert)")),
 			mcp.WithNumber("importance", mcp.Description("Importance 0.0-1.0, default 0.5")),
+			mcp.WithString("agent", mcp.Description("Agent name that created this memory (e.g. claude-code, cursor)")),
 		),
 		s.handleSave,
 	)
@@ -67,10 +78,13 @@ func (s *Server) registerTools() {
 		s.handleSearch,
 	)
 
+	// --- Deferred tools (loaded on-demand via ToolSearch to reduce session startup tokens) ---
+
 	// mem_update
 	s.mcp.AddTool(
 		mcp.NewTool("mem_update",
 			mcp.WithDescription("Update an existing memory by ID"),
+			mcp.WithDeferLoading(true),
 			mcp.WithNumber("id", mcp.Required(), mcp.Description("Observation ID")),
 			mcp.WithString("title", mcp.Required(), mcp.Description("New title")),
 			mcp.WithString("content", mcp.Required(), mcp.Description("New content")),
@@ -82,6 +96,7 @@ func (s *Server) registerTools() {
 	s.mcp.AddTool(
 		mcp.NewTool("mem_delete",
 			mcp.WithDescription("Delete a memory (soft delete by default)"),
+			mcp.WithDeferLoading(true),
 			mcp.WithNumber("id", mcp.Required(), mcp.Description("Observation ID")),
 			mcp.WithBoolean("hard", mcp.Description("Hard delete (permanent)")),
 		),
@@ -111,6 +126,7 @@ func (s *Server) registerTools() {
 	s.mcp.AddTool(
 		mcp.NewTool("mem_timeline",
 			mcp.WithDescription("Get chronological timeline around an observation"),
+			mcp.WithDeferLoading(true),
 			mcp.WithNumber("id", mcp.Required(), mcp.Description("Focus observation ID")),
 			mcp.WithNumber("before", mcp.Description("Entries before (default 5)")),
 			mcp.WithNumber("after", mcp.Description("Entries after (default 5)")),
@@ -122,6 +138,7 @@ func (s *Server) registerTools() {
 	s.mcp.AddTool(
 		mcp.NewTool("mem_session_start",
 			mcp.WithDescription("Register a new session"),
+			mcp.WithDeferLoading(true),
 			mcp.WithString("project", mcp.Description("Project name")),
 			mcp.WithString("directory", mcp.Description("Working directory")),
 		),
@@ -132,6 +149,7 @@ func (s *Server) registerTools() {
 	s.mcp.AddTool(
 		mcp.NewTool("mem_session_end",
 			mcp.WithDescription("End a session with optional summary"),
+			mcp.WithDeferLoading(true),
 			mcp.WithString("session_id", mcp.Required(), mcp.Description("Session ID")),
 			mcp.WithString("summary", mcp.Description("Session summary")),
 		),
@@ -152,6 +170,7 @@ func (s *Server) registerTools() {
 	s.mcp.AddTool(
 		mcp.NewTool("mem_save_prompt",
 			mcp.WithDescription("Archive a user prompt"),
+			mcp.WithDeferLoading(true),
 			mcp.WithString("session_id", mcp.Required(), mcp.Description("Session ID")),
 			mcp.WithString("content", mcp.Required(), mcp.Description("Prompt content")),
 			mcp.WithString("project", mcp.Description("Project name")),
@@ -163,6 +182,7 @@ func (s *Server) registerTools() {
 	s.mcp.AddTool(
 		mcp.NewTool("mem_relations",
 			mcp.WithDescription("Get related observations for a memory"),
+			mcp.WithDeferLoading(true),
 			mcp.WithNumber("id", mcp.Required(), mcp.Description("Observation ID")),
 		),
 		s.handleRelations,
@@ -172,6 +192,7 @@ func (s *Server) registerTools() {
 	s.mcp.AddTool(
 		mcp.NewTool("mem_relate",
 			mcp.WithDescription("Create a relation between two memories"),
+			mcp.WithDeferLoading(true),
 			mcp.WithNumber("from_id", mcp.Required(), mcp.Description("Source observation ID")),
 			mcp.WithNumber("to_id", mcp.Required(), mcp.Description("Target observation ID")),
 			mcp.WithString("type", mcp.Required(), mcp.Description("Relation type: supersedes, relates_to, contradicts, builds_on, caused_by, resolved_by")),
@@ -184,6 +205,7 @@ func (s *Server) registerTools() {
 	s.mcp.AddTool(
 		mcp.NewTool("mem_suggest_topic_key",
 			mcp.WithDescription("Generate a stable topic key from title and content"),
+			mcp.WithDeferLoading(true),
 			mcp.WithString("title", mcp.Required(), mcp.Description("Observation title")),
 			mcp.WithString("content", mcp.Required(), mcp.Description("Observation content")),
 		),
@@ -194,8 +216,90 @@ func (s *Server) registerTools() {
 	s.mcp.AddTool(
 		mcp.NewTool("mem_stats",
 			mcp.WithDescription("Get memory system statistics and metrics"),
+			mcp.WithDeferLoading(true),
 		),
 		s.handleStats,
+	)
+
+	// --- Innovation tools ---
+
+	// mem_surface (Proactive Memory Surfacing) — eager, auto-invoked by hooks
+	s.mcp.AddTool(
+		mcp.NewTool("mem_surface",
+			mcp.WithDescription("Proactively surface relevant memories based on current context text. Returns top matches the agent should be reminded about. Project is auto-detected from working directory if not specified."),
+			mcp.WithString("text", mcp.Required(), mcp.Description("Current context/prompt text to find relevant memories for")),
+			mcp.WithString("project", mcp.Description("Filter by project (auto-detected from cwd if empty)")),
+			mcp.WithNumber("limit", mcp.Description("Max results (default 5)")),
+		),
+		s.handleSurface,
+	)
+
+	// mem_cross_project (Cross-Project Knowledge) — deferred
+	s.mcp.AddTool(
+		mcp.NewTool("mem_cross_project",
+			mcp.WithDescription("Search memories across ALL projects, prioritizing global and personal scope. Use when knowledge from other projects may be relevant."),
+			mcp.WithDeferLoading(true),
+			mcp.WithString("query", mcp.Required(), mcp.Description("Search query")),
+			mcp.WithNumber("limit", mcp.Description("Max results (default 10)")),
+		),
+		s.handleCrossProject,
+	)
+
+	// mem_consolidate (Memory Consolidation) — deferred admin tool
+	s.mcp.AddTool(
+		mcp.NewTool("mem_consolidate",
+			mcp.WithDescription("Consolidate duplicate/overlapping memories by topic_key. Merges related observations into compact knowledge nuggets."),
+			mcp.WithDeferLoading(true),
+			mcp.WithString("project", mcp.Description("Project to consolidate (all if empty)")),
+		),
+		s.handleConsolidate,
+	)
+
+	// mem_gc (Garbage Collection) — deferred admin tool
+	s.mcp.AddTool(
+		mcp.NewTool("mem_gc",
+			mcp.WithDescription("Run memory decay and garbage collection. Reduces importance of stale memories and archives dead ones."),
+			mcp.WithDeferLoading(true),
+			mcp.WithNumber("stale_days", mcp.Description("Days without access to consider stale (default 60)")),
+			mcp.WithNumber("archive_threshold", mcp.Description("Importance below which memories get archived (default 0.1)")),
+		),
+		s.handleGC,
+	)
+
+	// mem_graph (Decision Graph) — deferred
+	s.mcp.AddTool(
+		mcp.NewTool("mem_graph",
+			mcp.WithDescription("Build a decision graph from relations around a focal observation. Visualizes how decisions connect."),
+			mcp.WithDeferLoading(true),
+			mcp.WithNumber("id", mcp.Required(), mcp.Description("Focal observation ID")),
+			mcp.WithNumber("depth", mcp.Description("Max traversal depth (default 3)")),
+		),
+		s.handleGraph,
+	)
+
+	// mem_enhanced_search (Enhanced Search) — deferred
+	s.mcp.AddTool(
+		mcp.NewTool("mem_enhanced_search",
+			mcp.WithDescription("Enhanced search with scope-aware boosting, revision value, and agent diversity scoring"),
+			mcp.WithDeferLoading(true),
+			mcp.WithString("query", mcp.Required(), mcp.Description("Search query")),
+			mcp.WithString("project", mcp.Description("Filter by project")),
+			mcp.WithString("type", mcp.Description("Filter by type")),
+			mcp.WithNumber("limit", mcp.Description("Max results (default 20)")),
+		),
+		s.handleEnhancedSearch,
+	)
+
+	// mem_agent_knowledge (Agent Collaboration) — deferred
+	s.mcp.AddTool(
+		mcp.NewTool("mem_agent_knowledge",
+			mcp.WithDescription("Get what a specific agent has learned, or get contributions by all agents for a project"),
+			mcp.WithDeferLoading(true),
+			mcp.WithString("agent", mcp.Description("Agent name to query (empty = all agents summary)")),
+			mcp.WithString("project", mcp.Description("Filter by project")),
+			mcp.WithNumber("limit", mcp.Description("Max results (default 20)")),
+		),
+		s.handleAgentKnowledge,
 	)
 }
 
@@ -209,6 +313,7 @@ func (s *Server) handleSave(_ context.Context, request mcp.CallToolRequest) (*mc
 		SessionID:  strArg(request, "session_id"),
 		Scope:      strArg(request, "scope"),
 		Importance: numArgDefault(request, "importance", 0.5),
+		Agent:      strArg(request, "agent"),
 	}
 
 	if proj := strArg(request, "project"); proj != "" {
@@ -222,6 +327,9 @@ func (s *Server) handleSave(_ context.Context, request mcp.CallToolRequest) (*mc
 	}
 	if obs.Scope == "" {
 		obs.Scope = "project"
+	}
+	if obs.Agent == "" {
+		obs.Agent = "claude-code"
 	}
 
 	id, err := s.store.Save(obs)
@@ -511,6 +619,202 @@ func (s *Server) handleStats(_ context.Context, _ mcp.CallToolRequest) (*mcp.Cal
 	return mcp.NewToolResultText(string(data)), nil
 }
 
+// --- Innovation handlers ---
+
+func (s *Server) handleSurface(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	text := strArg(request, "text")
+	project := strArg(request, "project")
+	limit := intArg(request, "limit", 5)
+
+	// Auto-detect project from working directory if not specified
+	if project == "" {
+		if cwd, err := os.Getwd(); err == nil {
+			project = inferProjectName(cwd)
+		}
+	}
+
+	results, err := s.store.SurfaceRelevant(text, project, limit)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	if len(results) == 0 {
+		return mcp.NewToolResultText("No relevant memories to surface."), nil
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Surfaced %d relevant memories:\n\n", len(results)))
+	for _, r := range results {
+		preview := truncate(r.Content, 300)
+		sb.WriteString(fmt.Sprintf("**#%d** [%s] %s (relevance: %.2f)\n", r.ID, r.Type, r.Title, r.Score))
+		sb.WriteString(fmt.Sprintf("  %s\n", preview))
+		if r.Agent != "" {
+			sb.WriteString(fmt.Sprintf("  agent: %s\n", r.Agent))
+		}
+		// Show connected memories (relations)
+		if rels, err := s.store.GetRelations(r.ID); err == nil && len(rels) > 0 {
+			sb.WriteString("  related: ")
+			relStrs := make([]string, 0, len(rels))
+			for _, rel := range rels {
+				otherID := rel.ToID
+				if otherID == r.ID {
+					otherID = rel.FromID
+				}
+				relStrs = append(relStrs, fmt.Sprintf("#%d (%s)", otherID, rel.Type))
+			}
+			sb.WriteString(strings.Join(relStrs, ", "))
+			sb.WriteString("\n")
+		}
+		sb.WriteString("\n")
+	}
+	return mcp.NewToolResultText(sb.String()), nil
+}
+
+func (s *Server) handleCrossProject(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	query := strArg(request, "query")
+	limit := intArg(request, "limit", 10)
+
+	results, err := s.store.CrossProjectSearch(query, limit)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	if len(results) == 0 {
+		return mcp.NewToolResultText("No cross-project results found."), nil
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Cross-project results (%d):\n\n", len(results)))
+	for _, r := range results {
+		project := "(none)"
+		if r.Project != nil {
+			project = *r.Project
+		}
+		preview := truncate(r.Content, 250)
+		sb.WriteString(fmt.Sprintf("**#%d** [%s] [%s] %s (score: %.2f, scope: %s)\n", r.ID, project, r.Type, r.Title, r.Score, r.Scope))
+		sb.WriteString(fmt.Sprintf("  %s\n\n", preview))
+	}
+	return mcp.NewToolResultText(sb.String()), nil
+}
+
+func (s *Server) handleConsolidate(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	project := strArg(request, "project")
+
+	count, err := s.store.Consolidate(project)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("Consolidated %d memory groups", count)), nil
+}
+
+func (s *Server) handleGC(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	staleDays := intArg(request, "stale_days", 60)
+	threshold := numArgDefault(request, "archive_threshold", 0.1)
+
+	decayed, archived, err := s.store.DecayAndGC(staleDays, threshold)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("GC complete: %d memories decayed, %d archived", decayed, archived)), nil
+}
+
+func (s *Server) handleGraph(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	id := int64(intArg(request, "id", 0))
+	depth := intArg(request, "depth", 3)
+
+	graph, err := s.store.BuildDecisionGraph(id, depth)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	data, _ := json.MarshalIndent(graph, "", "  ")
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+func (s *Server) handleEnhancedSearch(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	query := strArg(request, "query")
+	project := strArg(request, "project")
+	obsType := strArg(request, "type")
+	limit := intArg(request, "limit", 20)
+
+	results, err := s.store.EnhancedSearch(query, project, obsType, limit)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	if len(results) == 0 {
+		return mcp.NewToolResultText("No results found."), nil
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Enhanced search — %d results:\n\n", len(results)))
+	for _, r := range results {
+		preview := truncate(r.Content, 300)
+		agent := ""
+		if r.Agent != "" {
+			agent = fmt.Sprintf(" [%s]", r.Agent)
+		}
+		sb.WriteString(fmt.Sprintf("**#%d** [%s]%s %s (score: %.2f, rev: %d, scope: %s)\n", r.ID, r.Type, agent, r.Title, r.Score, r.RevisionCount, r.Scope))
+		sb.WriteString(fmt.Sprintf("  %s\n\n", preview))
+	}
+	return mcp.NewToolResultText(sb.String()), nil
+}
+
+func (s *Server) handleAgentKnowledge(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	agentName := strArg(request, "agent")
+	project := strArg(request, "project")
+	limit := intArg(request, "limit", 20)
+
+	if agentName != "" {
+		// Single agent knowledge
+		results, err := s.store.AgentKnowledge(agentName, limit)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		if len(results) == 0 {
+			return mcp.NewToolResultText(fmt.Sprintf("No knowledge found for agent '%s'", agentName)), nil
+		}
+
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("Agent '%s' knowledge (%d memories):\n\n", agentName, len(results)))
+		for _, o := range results {
+			preview := truncate(o.Content, 200)
+			proj := "(none)"
+			if o.Project != nil {
+				proj = *o.Project
+			}
+			sb.WriteString(fmt.Sprintf("**#%d** [%s] [%s] %s\n  %s\n\n", o.ID, proj, o.Type, o.Title, preview))
+		}
+		return mcp.NewToolResultText(sb.String()), nil
+	}
+
+	// All agents summary
+	contributions, err := s.store.AgentContributions(project, limit)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	if len(contributions) == 0 {
+		return mcp.NewToolResultText("No agent contributions found."), nil
+	}
+
+	var sb strings.Builder
+	sb.WriteString("Agent contributions:\n\n")
+	for agent, obs := range contributions {
+		name := agent
+		if name == "" {
+			name = "(unknown)"
+		}
+		sb.WriteString(fmt.Sprintf("**%s** — %d memories\n", name, len(obs)))
+		for _, o := range obs {
+			sb.WriteString(fmt.Sprintf("  - #%d [%s] %s\n", o.ID, o.Type, o.Title))
+		}
+		sb.WriteString("\n")
+	}
+	return mcp.NewToolResultText(sb.String()), nil
+}
+
 // --- Argument helpers ---
 
 func strArg(req mcp.CallToolRequest, name string) string {
@@ -531,6 +835,12 @@ func intArg(req mcp.CallToolRequest, name string, defaultVal int) int {
 			return int(n)
 		case int:
 			return n
+		case string:
+			// Handle string-typed numeric params (some MCP clients send numbers as strings)
+			var parsed int
+			if _, err := fmt.Sscanf(n, "%d", &parsed); err == nil {
+				return parsed
+			}
 		}
 	}
 	return defaultVal
@@ -561,4 +871,22 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+// inferProjectName extracts a project name from a directory path.
+// Uses the last component of the path (e.g., "/Users/yarov/projects/mio" → "mio").
+func inferProjectName(dir string) string {
+	if dir == "" {
+		return ""
+	}
+	// Remove trailing slash
+	for len(dir) > 1 && dir[len(dir)-1] == '/' {
+		dir = dir[:len(dir)-1]
+	}
+	// Get last path component
+	lastSlash := strings.LastIndex(dir, "/")
+	if lastSlash >= 0 && lastSlash < len(dir)-1 {
+		return dir[lastSlash+1:]
+	}
+	return dir
 }

@@ -1,0 +1,13 @@
+{
+  "name": "opencode-mio",
+  "version": "1.0.0",
+  "description": "Mio memory status plugin for OpenCode TUI",
+  "type": "module",
+  "main": "index.ts",
+  "plugin": {
+    "tui": "./index.ts"
+  },
+  "exports": {
+    ".": "./index.ts"
+  }
+}

@@ -135,6 +135,7 @@ func openStore(cfg *config.Config) *store.Store {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
+	// TF-IDF embedder is auto-initialized inside store.New() — no config needed
 	return s
 }
 
@@ -574,11 +575,36 @@ func runImport(cfg *config.Config, args []string) {
 		len(data.Sessions), len(data.Observations), len(data.Prompts))
 }
 
+func createSyncTransport(cfg *config.Config) (msync.Transport, error) {
+	switch cfg.SyncTransport {
+	case "git":
+		return msync.NewGitTransport(cfg.SyncGitRemote, cfg.SyncGitBranch)
+	case "s3":
+		return msync.NewS3Transport(
+			cfg.SyncS3Endpoint,
+			cfg.SyncS3Bucket,
+			cfg.SyncS3AccessKey,
+			cfg.SyncS3SecretKey,
+			cfg.SyncS3Region,
+		)
+	case "file", "":
+		return nil, nil // nil means use default FileTransport
+	default:
+		return nil, fmt.Errorf("unknown sync transport: %s", cfg.SyncTransport)
+	}
+}
+
 func runSync(cfg *config.Config, args []string) {
 	s := openStore(cfg)
 	defer s.Close()
 
-	syncer, err := msync.NewSyncer(s, cfg)
+	transport, err := createSyncTransport(cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error creating transport: %v\n", err)
+		os.Exit(1)
+	}
+
+	syncer, err := msync.NewSyncer(s, cfg, transport)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)

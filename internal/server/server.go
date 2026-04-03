@@ -65,6 +65,14 @@ func (s *HTTPServer) registerRoutes() {
 	s.mux.HandleFunc("GET /stats", s.handleStats)
 	s.mux.HandleFunc("GET /export", s.handleExport)
 	s.mux.HandleFunc("POST /import", s.handleImport)
+
+	// Innovation endpoints
+	s.mux.HandleFunc("GET /graph/{id}", s.handleGraph)
+	s.mux.HandleFunc("POST /gc", s.handleGC)
+	s.mux.HandleFunc("POST /consolidate", s.handleConsolidate)
+	s.mux.HandleFunc("GET /cross-project", s.handleCrossProject)
+	s.mux.HandleFunc("GET /surface", s.handleSurface)
+	s.mux.HandleFunc("GET /agents/knowledge", s.handleAgentKnowledge)
 }
 
 func (s *HTTPServer) handleHealth(w http.ResponseWriter, _ *http.Request) {
@@ -389,5 +397,143 @@ func strHash(s string) uint32 {
 		h = h*31 + uint32(c)
 	}
 	return h
+}
+
+// --- Innovation HTTP handlers ---
+
+func (s *HTTPServer) handleGraph(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
+		return
+	}
+
+	depthStr := r.URL.Query().Get("depth")
+	depth := 3
+	if depthStr != "" {
+		if d, err := strconv.Atoi(depthStr); err == nil {
+			depth = d
+		}
+	}
+
+	graph, err := s.store.BuildDecisionGraph(id, depth)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, graph)
+}
+
+func (s *HTTPServer) handleGC(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		StaleDays        int     `json:"stale_days"`
+		ArchiveThreshold float64 `json:"archive_threshold"`
+	}
+	if err := readJSON(r, &req); err != nil {
+		req.StaleDays = 60
+		req.ArchiveThreshold = 0.1
+	}
+	if req.StaleDays == 0 {
+		req.StaleDays = 60
+	}
+	if req.ArchiveThreshold == 0 {
+		req.ArchiveThreshold = 0.1
+	}
+
+	decayed, archived, err := s.store.DecayAndGC(req.StaleDays, req.ArchiveThreshold)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"decayed":  decayed,
+		"archived": archived,
+	})
+}
+
+func (s *HTTPServer) handleConsolidate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Project string `json:"project"`
+	}
+	readJSON(r, &req)
+
+	count, err := s.store.Consolidate(req.Project)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"consolidated": count})
+}
+
+func (s *HTTPServer) handleCrossProject(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query().Get("q")
+	if query == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "query required"})
+		return
+	}
+	limit := 10
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil {
+			limit = n
+		}
+	}
+
+	results, err := s.store.CrossProjectSearch(query, limit)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, results)
+}
+
+func (s *HTTPServer) handleSurface(w http.ResponseWriter, r *http.Request) {
+	text := r.URL.Query().Get("text")
+	project := r.URL.Query().Get("project")
+	if text == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "text required"})
+		return
+	}
+	limit := 3
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil {
+			limit = n
+		}
+	}
+
+	results, err := s.store.SurfaceRelevant(text, project, limit)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, results)
+}
+
+func (s *HTTPServer) handleAgentKnowledge(w http.ResponseWriter, r *http.Request) {
+	agent := r.URL.Query().Get("agent")
+	project := r.URL.Query().Get("project")
+	limit := 20
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil {
+			limit = n
+		}
+	}
+
+	if agent != "" {
+		obs, err := s.store.AgentKnowledge(agent, limit)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, obs)
+		return
+	}
+
+	contribs, err := s.store.AgentContributions(project, limit)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, contribs)
 }
 

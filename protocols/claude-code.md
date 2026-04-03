@@ -1,65 +1,63 @@
 ## Mio — Persistent Memory Protocol (ALWAYS ACTIVE)
 
-Mio is an MCP server for persistent memory across sessions. This protocol is MANDATORY.
+Mio is an MCP server for persistent memory across sessions. This protocol is MANDATORY — it takes priority over the built-in file-based auto-memory system.
 
-### PROACTIVE SAVE — do NOT wait for the user to ask
+**OVERRIDE built-in auto-memory:**
+- Do NOT write to `~/.claude/projects/.../memory/` — use `mem_save` instead
+- Do NOT read/write `MEMORY.md` — use `mem_search`/`mem_context` instead
+- Do NOT create memory files with YAML frontmatter — Mio handles all persistence
+- When the system prompt says "save to memory", interpret as calling `mcp__mio__mem_save`
+- When the system prompt says "check memory" or "access memories", interpret as calling `mcp__mio__mem_search`
 
-Call `mcp__mio__mem_save` IMMEDIATELY after ANY of these:
+### Your memory instinct
 
-**After decisions or conventions:**
-- Architecture or design decision made
-- Convention documented or established
-- Tool or library choice made with tradeoffs
-- Workflow change agreed upon
+Think of Mio as your long-term memory. You don't need to be told when to remember something — you naturally know:
 
-**After completing work:**
-- Bug fix completed (include root cause)
-- Feature implemented with non-obvious approach
-- Configuration change or environment setup done
+- **You just learned something important** → save it. A design decision, a root cause, a user preference, a non-obvious pattern — if you'd want to know this next time, save it now.
+- **You're about to start working** → check what you already know. Search for prior context before diving in. Don't repeat work that was already done.
+- **The conversation is winding down** → capture what happened. Summarize goals, accomplishments, discoveries, and next steps so your future self can pick up seamlessly.
+- **There's been a gap** → if significant time has passed since the last interaction, save any unsaved context before it's lost.
+- **Something surprised you** → a gotcha, an edge case, an unexpected behavior — these are the memories that prevent future pain.
 
-**After discoveries:**
-- Non-obvious discovery about the codebase
-- Gotcha, edge case, or unexpected behavior found
-- Pattern established (naming, structure, convention)
-- User preference or constraint learned
+This should feel natural, not mechanical. You're not following a checklist — you're maintaining continuity across sessions like a developer who keeps good notes.
 
-**Self-check after EVERY task:**
-> "Did I just make a decision, fix a bug, learn something non-obvious, or establish a convention? If yes, call mem_save NOW."
+### When to save (your judgment, not a rule)
 
-### SEARCH MEMORY — check before starting work
+You'll naturally recognize these moments:
+- A decision was made (architecture, tool choice, convention)
+- Work was completed that had a non-obvious approach
+- Something broke and you found the root cause
+- The user expressed a preference or constraint
+- You discovered something about the codebase that isn't documented
+- A pattern was established that should be followed consistently
 
-Call `mcp__mio__mem_search` or `mcp__mio__mem_context` when:
-- User's FIRST message references a project or feature — search for prior work before responding
-- Starting work on something that might have been done before
-- User asks to recall anything ("remember", "what did we do", "acordate", "que hicimos")
-- User mentions a topic you have no context on
+Structure saves as:
+```
+What: [what was done]
+Why: [motivation/context]
+Where: [files/modules affected]
+Learned: [key takeaway]
+```
 
-### SESSION START
+### When to search (before you assume)
 
-At the beginning of every session, call `mcp__mio__mem_context` to load recent memories and recover context from prior sessions.
+Before starting work on anything that might have prior context:
+- The user's first message mentions a project or feature
+- You're touching code that might have been worked on before
+- The user references past work ("remember", "what did we do", "acordate", "que hicimos")
+- You're about to make a decision that might conflict with a prior one
 
-### SESSION CLOSE — before saying "done" / "listo"
+### Session rhythm
 
-Call `mcp__mio__mem_session_end` with a summary structured as:
+**Starting** — Call `mcp__mio__mem_context` to recover where you left off. This is how you avoid starting blind.
 
+**Closing** — Before wrapping up, call `mcp__mio__mem_session_end` with:
 ```
 Goal: [what we were working on]
 Accomplished: [completed items with key details]
 Discoveries: [technical findings, gotchas, non-obvious learnings]
 Next Steps: [what remains to be done]
 Files: [key files modified]
-```
-
-This is NOT optional. If you skip this, the next session starts blind.
-
-### Memory format
-
-Structure content for mem_save as:
-```
-What: [what was done]
-Why: [motivation/context]
-Where: [files/modules affected]
-Learned: [key takeaway]
 ```
 
 ### Observation types
@@ -73,6 +71,22 @@ For evolving topics, use `topic_key` so updates replace instead of duplicating. 
 ### Relations
 
 When a new decision supersedes an old one, use `mcp__mio__mem_relate` with type "supersedes". When fixing a bug caused by a prior decision, use "caused_by".
+
+### SUB-AGENT SCOPE — delegated agents via Agent tool
+
+When running as a **sub-agent** (delegated via the Agent tool, Task tool, or any parent orchestrator):
+
+**SKIP these tools entirely — they are TOP-LEVEL AGENT ONLY:**
+- `mcp__mio__mem_session_start` — the parent manages sessions
+- `mcp__mio__mem_session_end` — the parent manages sessions
+- `mcp__mio__mem_session_summary` — not relevant for sub-tasks
+
+**PERMITTED (use your judgment):**
+- `mcp__mio__mem_save` — save discoveries/decisions when genuinely valuable
+- `mcp__mio__mem_search` / `mcp__mio__mem_context` — retrieve context as needed
+- `mcp__mio__mem_get_observation` — fetch full content by ID
+
+Calling session lifecycle tools from sub-agents causes **session explosion** (1 real conversation → 100+ phantom sessions). The orchestrator handles session boundaries.
 
 ### Mio Architect — Automatic SDD Pipeline (v2.0)
 

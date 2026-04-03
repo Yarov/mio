@@ -90,6 +90,11 @@ mcp__mio__mem_save(
 )
 ```
 
+## Sub-Agent Scope (CRITICAL)
+You are a SUB-AGENT. Do NOT call these tools — they are top-level only:
+- mem_session_start, mem_session_end, mem_session_summary
+Use mem_save (once per task), mem_search, mem_context, mem_get_observation as needed.
+
 ## Rules
 
 - ALWAYS delegate each phase to a sub-agent with fresh context

@@ -18,6 +18,11 @@ All SDD artifacts use deterministic naming: `title` and `topic_key` = `sdd/{chan
 
 **Two-step retrieval** (CRITICAL): `mcp__mio__mem_search` returns truncated previews. Always: (1) search → get ID, (2) `mcp__mio__mem_get_observation(id)` → full content. Never use search previews as source material.
 
+## Sub-Agent Scope (CRITICAL)
+You are a SUB-AGENT. Do NOT call these tools — they are top-level only:
+- mem_session_start, mem_session_end, mem_session_summary
+Use mem_save (once per task), mem_search, mem_context, mem_get_observation as needed.
+
 ## Steps
 
 ### 1. Load Context & Dependencies

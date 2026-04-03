@@ -33,17 +33,23 @@ type Syncer struct {
 	manifest  *Manifest
 }
 
-func NewSyncer(s *store.Store, cfg *config.Config) (*Syncer, error) {
-	chunksDir := filepath.Join(cfg.DataDir, "chunks")
-	transport, err := NewFileTransport(chunksDir)
-	if err != nil {
-		return nil, err
+func NewSyncer(s *store.Store, cfg *config.Config, transport ...Transport) (*Syncer, error) {
+	var t Transport
+	if len(transport) > 0 && transport[0] != nil {
+		t = transport[0]
+	} else {
+		chunksDir := filepath.Join(cfg.DataDir, "chunks")
+		ft, err := NewFileTransport(chunksDir)
+		if err != nil {
+			return nil, err
+		}
+		t = ft
 	}
 
 	syncer := &Syncer{
 		store:     s,
 		cfg:       cfg,
-		transport: transport,
+		transport: t,
 	}
 
 	if err := syncer.loadManifest(); err != nil {
