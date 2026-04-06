@@ -27,10 +27,7 @@ func (s *Store) EnhancedSearch(query string, project string, obsType string, lim
 		AND o.deleted_at IS NULL`
 	args := []interface{}{sanitized}
 
-	if project != "" {
-		q += ` AND o.project = ?`
-		args = append(args, project)
-	}
+	q, args = appendProjectFilter(q, args, "o.project", project)
 	if obsType != "" {
 		q += ` AND o.type = ?`
 		args = append(args, obsType)
@@ -170,14 +167,14 @@ func (s *Store) AgentContributions(project string, limit int) (map[string][]Obse
 	}
 
 	// Get agents ordered by contribution count.
-	agentRows, err := s.db.Query(
-		`SELECT agent, COUNT(*) AS cnt
+	agentQ := `SELECT agent, COUNT(*) AS cnt
 		FROM observations
-		WHERE project = ? AND deleted_at IS NULL
-		GROUP BY agent
-		ORDER BY cnt DESC`,
-		project,
-	)
+		WHERE deleted_at IS NULL`
+	agentArgs := []interface{}{}
+	agentQ, agentArgs = appendProjectFilter(agentQ, agentArgs, "project", project)
+	agentQ += ` GROUP BY agent
+		ORDER BY cnt DESC`
+	agentRows, err := s.db.Query(agentQ, agentArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("agent contributions query: %w", err)
 	}
@@ -198,13 +195,14 @@ func (s *Store) AgentContributions(project string, limit int) (map[string][]Obse
 
 	result := make(map[string][]Observation, len(agents))
 	for _, agent := range agents {
-		rows, err := s.db.Query(
-			`SELECT `+obsColumns+` FROM observations
-			WHERE agent = ? AND project = ? AND deleted_at IS NULL
-			ORDER BY importance DESC
-			LIMIT ?`,
-			agent, project, limit,
-		)
+		obsQ := `SELECT ` + obsColumns + ` FROM observations
+			WHERE agent = ? AND deleted_at IS NULL`
+		obsArgs := []interface{}{agent}
+		obsQ, obsArgs = appendProjectFilter(obsQ, obsArgs, "project", project)
+		obsQ += ` ORDER BY importance DESC
+			LIMIT ?`
+		obsArgs = append(obsArgs, limit)
+		rows, err := s.db.Query(obsQ, obsArgs...)
 		if err != nil {
 			return nil, fmt.Errorf("agent observations query: %w", err)
 		}

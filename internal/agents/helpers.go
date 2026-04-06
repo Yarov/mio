@@ -109,6 +109,47 @@ func WriteMCPToSharedJSON(configPath, binPath string) error {
 	return os.WriteFile(configPath, append(data, '\n'), 0644)
 }
 
+// MergeMioMCPEnv merges key/value pairs into the "env" block of the mio MCP server
+// in a shared mcp.json (e.g. ~/.cursor/mcp.json). Preserves other keys on the server entry.
+func MergeMioMCPEnv(configPath string, env map[string]string) error {
+	if len(env) == 0 {
+		return nil
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return err
+	}
+	cfg := make(map[string]interface{})
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return err
+	}
+	servers, ok := cfg["mcpServers"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	raw, ok := servers["mio"].(map[string]interface{})
+	if !ok || raw == nil {
+		return nil
+	}
+	var existing map[string]interface{}
+	if cur, ok := raw["env"].(map[string]interface{}); ok && cur != nil {
+		existing = cur
+	} else {
+		existing = make(map[string]interface{})
+	}
+	for k, v := range env {
+		existing[k] = v
+	}
+	raw["env"] = existing
+	servers["mio"] = raw
+	cfg["mcpServers"] = servers
+	out, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(configPath, append(out, '\n'), 0644)
+}
+
 // RemoveMCPFromOwnFile removes the standalone MCP config file.
 func RemoveMCPFromOwnFile(configPath string) error {
 	err := os.Remove(configPath)
@@ -168,6 +209,258 @@ func HasMCPConfig(configPath string) bool {
 	}
 	_, exists := servers["mio"]
 	return exists
+}
+
+// CursorMCPAutoAllowPattern is the Cursor permissions.json allowlist entry so MCP
+// tools from the server named "mio" run without per-call approval prompts.
+// See: https://cursor.com/docs/reference/permissions
+const CursorMCPAutoAllowPattern = "mio:*"
+
+// CursorDisableWorkspaceTrustKey disables trust prompts at workspace open.
+// This is a convenience default for teams that want zero-friction agent startup.
+const CursorDisableWorkspaceTrustKey = "security.workspace.trust.enabled"
+
+// MergeCursorPermissionsAllowlist adds pattern to the mcpAllowlist array in permissionsPath
+// (~/.cursor/permissions.json). Preserves other top-level keys and existing entries.
+// Accepts JSON or JSONC (comments/trailing commas), then writes normalized JSON.
+func MergeCursorPermissionsAllowlist(permissionsPath, pattern string) error {
+	if pattern == "" {
+		return nil
+	}
+	cfg := make(map[string]interface{})
+	if data, err := os.ReadFile(permissionsPath); err == nil {
+		parsed, err := parseJSONOrJSONC(data)
+		if err != nil {
+			return fmt.Errorf("parse permissions.json: %w", err)
+		}
+		cfg = parsed
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+
+	raw, _ := cfg["mcpAllowlist"].([]interface{})
+	list := make([]string, 0, len(raw)+1)
+	seen := make(map[string]struct{})
+	for _, item := range raw {
+		s, ok := item.(string)
+		if !ok {
+			continue
+		}
+		if _, dup := seen[s]; dup {
+			continue
+		}
+		seen[s] = struct{}{}
+		list = append(list, s)
+	}
+	if _, has := seen[pattern]; !has {
+		list = append(list, pattern)
+	}
+
+	outList := make([]interface{}, len(list))
+	for i, s := range list {
+		outList[i] = s
+	}
+	cfg["mcpAllowlist"] = outList
+
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(permissionsPath), 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(permissionsPath, append(data, '\n'), 0644)
+}
+
+// RemoveCursorPermissionsAllowlistPattern removes pattern from mcpAllowlist and drops
+// the key if empty. Deletes the file if no top-level keys remain.
+func RemoveCursorPermissionsAllowlistPattern(permissionsPath, pattern string) error {
+	data, err := os.ReadFile(permissionsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	cfg, err := parseJSONOrJSONC(data)
+	if err != nil {
+		return nil // leave non-JSON files untouched
+	}
+	raw, ok := cfg["mcpAllowlist"].([]interface{})
+	if !ok {
+		return nil
+	}
+	filtered := make([]interface{}, 0, len(raw))
+	for _, item := range raw {
+		s, ok := item.(string)
+		if !ok || s == pattern {
+			continue
+		}
+		filtered = append(filtered, s)
+	}
+	if len(filtered) == 0 {
+		delete(cfg, "mcpAllowlist")
+	} else {
+		cfg["mcpAllowlist"] = filtered
+	}
+	if len(cfg) == 0 {
+		return os.Remove(permissionsPath)
+	}
+	out, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(permissionsPath, append(out, '\n'), 0644)
+}
+
+// MergeCursorSettingsBool sets/overwrites a bool setting in ~/.cursor/settings.json.
+// Accepts JSON or JSONC input and writes normalized JSON.
+func MergeCursorSettingsBool(settingsPath, dottedKey string, value bool) error {
+	if dottedKey == "" {
+		return nil
+	}
+	cfg := make(map[string]interface{})
+	if data, err := os.ReadFile(settingsPath); err == nil {
+		parsed, err := parseJSONOrJSONC(data)
+		if err != nil {
+			return fmt.Errorf("parse settings.json: %w", err)
+		}
+		cfg = parsed
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+
+	cfg[dottedKey] = value
+	out, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(settingsPath, append(out, '\n'), 0644)
+}
+
+func parseJSONOrJSONC(data []byte) (map[string]interface{}, error) {
+	cfg := make(map[string]interface{})
+	if err := json.Unmarshal(data, &cfg); err == nil {
+		return cfg, nil
+	}
+
+	sanitized := stripJSONTrailingCommas(stripJSONComments(strings.TrimPrefix(string(data), "\ufeff")))
+	if err := json.Unmarshal([]byte(sanitized), &cfg); err != nil {
+		return nil, fmt.Errorf("invalid JSON/JSONC: %w", err)
+	}
+	return cfg, nil
+}
+
+func stripJSONComments(s string) string {
+	const (
+		modeNormal = iota
+		modeString
+		modeLineComment
+		modeBlockComment
+	)
+	var b strings.Builder
+	mode := modeNormal
+	escape := false
+
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch mode {
+		case modeNormal:
+			if c == '"' {
+				mode = modeString
+				b.WriteByte(c)
+				continue
+			}
+			if c == '/' && i+1 < len(s) {
+				n := s[i+1]
+				if n == '/' {
+					mode = modeLineComment
+					i++
+					continue
+				}
+				if n == '*' {
+					mode = modeBlockComment
+					i++
+					continue
+				}
+			}
+			b.WriteByte(c)
+		case modeString:
+			b.WriteByte(c)
+			if escape {
+				escape = false
+				continue
+			}
+			if c == '\\' {
+				escape = true
+				continue
+			}
+			if c == '"' {
+				mode = modeNormal
+			}
+		case modeLineComment:
+			if c == '\n' {
+				mode = modeNormal
+				b.WriteByte('\n')
+			}
+		case modeBlockComment:
+			if c == '*' && i+1 < len(s) && s[i+1] == '/' {
+				mode = modeNormal
+				i++
+			}
+		}
+	}
+	return b.String()
+}
+
+func stripJSONTrailingCommas(s string) string {
+	var b strings.Builder
+	inString := false
+	escape := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if inString {
+			b.WriteByte(c)
+			if escape {
+				escape = false
+				continue
+			}
+			if c == '\\' {
+				escape = true
+				continue
+			}
+			if c == '"' {
+				inString = false
+			}
+			continue
+		}
+
+		if c == '"' {
+			inString = true
+			b.WriteByte(c)
+			continue
+		}
+
+		if c == ',' {
+			j := i + 1
+			for j < len(s) {
+				ws := s[j]
+				if ws == ' ' || ws == '\t' || ws == '\n' || ws == '\r' {
+					j++
+					continue
+				}
+				break
+			}
+			if j < len(s) && (s[j] == '}' || s[j] == ']') {
+				continue
+			}
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
 }
 
 // --- Protocol file helpers ---
@@ -395,6 +688,35 @@ func InstallProtocolFromAssets(binPath, embeddedPath, destPath string) error {
 		return err
 	}
 	return InstallProtocol(destPath, string(data))
+}
+
+// InstallCursorMDCRuleFromAssets writes a Cursor-native rule file (.mdc): YAML frontmatter
+// with alwaysApply, then the protocol body. Cursor applies .mdc rules more reliably than
+// plain .md in ~/.cursor/rules (see Cursor community discussions on global rules).
+func InstallCursorMDCRuleFromAssets(binPath, embeddedPath, destPath string) error {
+	var body string
+	if content, ok := ReadEmbeddedFile(embeddedPath); ok {
+		body = content
+	} else {
+		srcPath := FindProjectFile(binPath, embeddedPath)
+		if srcPath == "" {
+			return fmt.Errorf("%s not found", embeddedPath)
+		}
+		data, err := os.ReadFile(srcPath)
+		if err != nil {
+			return err
+		}
+		body = string(data)
+	}
+	front := "---\ndescription: \"Mio — persistent memory via MCP (mem_save, mem_search, mem_context, session tools, SDD)\"\nalwaysApply: true\n---\n\n"
+	out := front + body
+	if existing, err := os.ReadFile(destPath); err == nil && string(existing) == out {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(destPath, []byte(out), 0644)
 }
 
 // ReadEmbeddedFile reads a file from the embedded assets.

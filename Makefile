@@ -5,8 +5,13 @@ BUILD_DIR=./bin
 PREFIX?=/usr/local
 UNAME_S := $(shell uname -s)
 
+# Match release builds (.goreleaser.yml): inject version/commit so `mio version` isn’t just "dev".
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
+LDFLAGS := -X main.version=$(VERSION) -X main.commit=$(COMMIT)
+
 build:
-	go build -o $(BUILD_DIR)/$(BINARY) ./cmd/mio
+	go build -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY) ./cmd/mio
 ifeq ($(UNAME_S),Darwin)
 	-codesign -f -s - $(BUILD_DIR)/$(BINARY) 2>/dev/null
 endif

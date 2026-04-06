@@ -36,7 +36,7 @@ Load the relevant skill(s) BEFORE writing any code. Follow ALL patterns from the
 
 ## Memory Protocol
 
-Mio memory is always active via MCP. See `protocols/claude-code.md` for the full protocol. Key tools:
+Mio memory is always active via MCP. Full protocol: `protocols/cursor.md` (Cursor) or `protocols/claude-code.md` (Claude Code). Key tools:
 - `mem_save` - Save decisions, discoveries, bugs (proactive, don't wait for user)
 - `mem_search` / `mem_context` - Retrieve prior context before starting work
 - `mem_get_observation` - Fetch full content by ID (search returns truncated previews)

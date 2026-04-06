@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -17,9 +18,9 @@ import (
 )
 
 type Server struct {
-	store  *store.Store
-	cfg    *config.Config
-	mcp    *server.MCPServer
+	store *store.Store
+	cfg   *config.Config
+	mcp   *server.MCPServer
 }
 
 func New(s *store.Store, cfg *config.Config) *Server {
@@ -40,7 +41,7 @@ func (s *Server) ServeStdio() error {
 
 func (s *Server) registerTools() {
 	// Tool loading strategy:
-	// EAGER (always in context): mem_save, mem_search, mem_get_observation, mem_context, mem_session_summary
+	// EAGER (always in context): mem_save, mem_search, mem_get_observation, mem_context, mem_session_summary, mem_tool_guide
 	//   → Core tools needed every session
 	// DEFERRED (loaded on-demand via ToolSearch): mem_update, mem_delete, mem_timeline,
 	//   mem_session_start, mem_session_end, mem_save_prompt, mem_relations, mem_relate,
@@ -69,13 +70,22 @@ func (s *Server) registerTools() {
 	// mem_search
 	s.mcp.AddTool(
 		mcp.NewTool("mem_search",
-			mcp.WithDescription("Search memories using full-text search with temporal decay and importance weighting"),
+			mcp.WithDescription("Search memories using full-text search with temporal decay and importance weighting. Project filter matches loosely (my-app = MyApp). Previews are truncated unless include_full=true (caps long bodies). For authoritative text, still prefer mem_get_observation after search."),
 			mcp.WithString("query", mcp.Required(), mcp.Description("Search query")),
 			mcp.WithString("project", mcp.Description("Filter by project")),
 			mcp.WithString("type", mcp.Description("Filter by observation type")),
 			mcp.WithNumber("limit", mcp.Description("Max results (default 20)")),
+			mcp.WithBoolean("include_full", mcp.Description("If true, return full content per hit (capped) instead of short previews")),
 		),
 		s.handleSearch,
+	)
+
+	// mem_tool_guide — short routing doc for agents (eager so it is always callable)
+	s.mcp.AddTool(
+		mcp.NewTool("mem_tool_guide",
+			mcp.WithDescription("When unsure which Mio tool to use, call this for a compact routing guide (search vs context vs sessions, include_full, MIO_SUBAGENT, project matching)."),
+		),
+		s.handleToolGuide,
 	)
 
 	// --- Deferred tools (loaded on-demand via ToolSearch to reduce session startup tokens) ---
@@ -115,8 +125,8 @@ func (s *Server) registerTools() {
 	// mem_context
 	s.mcp.AddTool(
 		mcp.NewTool("mem_context",
-			mcp.WithDescription("Get recent observations for context"),
-			mcp.WithString("project", mcp.Description("Filter by project")),
+			mcp.WithDescription("Get recent observations for context. If project is omitted, uses the current working directory folder name (same idea as mem_surface)."),
+			mcp.WithString("project", mcp.Description("Filter by project (optional — inferred from cwd when empty)")),
 			mcp.WithNumber("limit", mcp.Description("Max results")),
 		),
 		s.handleContext,
@@ -137,10 +147,11 @@ func (s *Server) registerTools() {
 	// mem_session_start
 	s.mcp.AddTool(
 		mcp.NewTool("mem_session_start",
-			mcp.WithDescription("Register a new session"),
+			mcp.WithDescription("Register a new session. Blocked when env MIO_SUBAGENT is set (nested agents) unless force=true."),
 			mcp.WithDeferLoading(true),
 			mcp.WithString("project", mcp.Description("Project name")),
 			mcp.WithString("directory", mcp.Description("Working directory")),
+			mcp.WithBoolean("force", mcp.Description("Bypass MIO_SUBAGENT guard — only for the top-level agent")),
 		),
 		s.handleSessionStart,
 	)
@@ -148,10 +159,11 @@ func (s *Server) registerTools() {
 	// mem_session_end
 	s.mcp.AddTool(
 		mcp.NewTool("mem_session_end",
-			mcp.WithDescription("End a session with optional summary"),
+			mcp.WithDescription("End a session with optional summary. Blocked when env MIO_SUBAGENT is set unless force=true."),
 			mcp.WithDeferLoading(true),
 			mcp.WithString("session_id", mcp.Required(), mcp.Description("Session ID")),
 			mcp.WithString("summary", mcp.Description("Session summary")),
+			mcp.WithBoolean("force", mcp.Description("Bypass MIO_SUBAGENT guard — only for the top-level agent")),
 		),
 		s.handleSessionEnd,
 	)
@@ -159,9 +171,10 @@ func (s *Server) registerTools() {
 	// mem_session_summary
 	s.mcp.AddTool(
 		mcp.NewTool("mem_session_summary",
-			mcp.WithDescription("Get recent sessions with observation counts"),
-			mcp.WithString("project", mcp.Description("Filter by project")),
+			mcp.WithDescription("Get recent sessions with observation counts. If project is omitted, uses cwd folder name. Blocked when env MIO_SUBAGENT is set unless force=true."),
+			mcp.WithString("project", mcp.Description("Filter by project (optional — inferred from cwd when empty)")),
 			mcp.WithNumber("limit", mcp.Description("Max results (default 10)")),
+			mcp.WithBoolean("force", mcp.Description("Bypass MIO_SUBAGENT guard — only for the top-level agent")),
 		),
 		s.handleSessionSummary,
 	)
@@ -229,7 +242,7 @@ func (s *Server) registerTools() {
 			mcp.WithDescription("Proactively surface relevant memories based on current context text. Returns top matches the agent should be reminded about. Project is auto-detected from working directory if not specified."),
 			mcp.WithString("text", mcp.Required(), mcp.Description("Current context/prompt text to find relevant memories for")),
 			mcp.WithString("project", mcp.Description("Filter by project (auto-detected from cwd if empty)")),
-			mcp.WithNumber("limit", mcp.Description("Max results (default 5)")),
+			mcp.WithNumber("limit", mcp.Description("Max results (default 3)")),
 		),
 		s.handleSurface,
 	)
@@ -266,6 +279,18 @@ func (s *Server) registerTools() {
 		s.handleGC,
 	)
 
+	// mem_summarize (Summarize Old Memories) — deferred admin tool
+	s.mcp.AddTool(
+		mcp.NewTool("mem_summarize",
+			mcp.WithDescription("Compress old memories by extracting key lines (What/Why/Learned). Reduces token cost of search results."),
+			mcp.WithDeferLoading(true),
+			mcp.WithString("project", mcp.Description("Filter by project")),
+			mcp.WithNumber("age_days", mcp.Description("Min age in days to summarize (default 30)")),
+			mcp.WithNumber("max_len", mcp.Description("Max content length after summarization (default 200)")),
+		),
+		s.handleSummarize,
+	)
+
 	// mem_graph (Decision Graph) — deferred
 	s.mcp.AddTool(
 		mcp.NewTool("mem_graph",
@@ -280,12 +305,13 @@ func (s *Server) registerTools() {
 	// mem_enhanced_search (Enhanced Search) — deferred
 	s.mcp.AddTool(
 		mcp.NewTool("mem_enhanced_search",
-			mcp.WithDescription("Enhanced search with scope-aware boosting, revision value, and agent diversity scoring"),
+			mcp.WithDescription("Enhanced search with scope-aware boosting, revision value, and agent diversity scoring. Same include_full and loose project matching as mem_search."),
 			mcp.WithDeferLoading(true),
 			mcp.WithString("query", mcp.Required(), mcp.Description("Search query")),
 			mcp.WithString("project", mcp.Description("Filter by project")),
 			mcp.WithString("type", mcp.Description("Filter by type")),
 			mcp.WithNumber("limit", mcp.Description("Max results (default 20)")),
+			mcp.WithBoolean("include_full", mcp.Description("If true, return full content per hit (capped) instead of long previews")),
 		),
 		s.handleEnhancedSearch,
 	)
@@ -329,7 +355,13 @@ func (s *Server) handleSave(_ context.Context, request mcp.CallToolRequest) (*mc
 		obs.Scope = "project"
 	}
 	if obs.Agent == "" {
-		obs.Agent = "claude-code"
+		// Cursor setup adds MIO_DEFAULT_AGENT=cursor in ~/.cursor/mcp.json.
+		// Everyone else keeps the long-standing default for Claude Code & co.
+		if v := strings.TrimSpace(os.Getenv("MIO_DEFAULT_AGENT")); v != "" {
+			obs.Agent = v
+		} else {
+			obs.Agent = "claude-code"
+		}
 	}
 
 	id, err := s.store.Save(obs)
@@ -345,6 +377,7 @@ func (s *Server) handleSearch(_ context.Context, request mcp.CallToolRequest) (*
 	project := strArg(request, "project")
 	obsType := strArg(request, "type")
 	limit := intArg(request, "limit", 20)
+	includeFull := boolArg(request, "include_full")
 
 	results, err := s.store.Search(query, project, obsType, limit)
 	if err != nil {
@@ -356,26 +389,18 @@ func (s *Server) handleSearch(_ context.Context, request mcp.CallToolRequest) (*
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("# Search Results\n\n> **%d** matches found\n\n---\n\n", len(results)))
-	for i, r := range results {
-		topic := ""
-		if r.TopicKey != nil {
-			topic = fmt.Sprintf(" `%s`", *r.TopicKey)
-		}
-		preview := truncate(r.Content, 300)
-		sb.WriteString(fmt.Sprintf("### #%d — %s\n\n", r.ID, r.Title))
-		sb.WriteString(fmt.Sprintf("| Type | Score | Accessed | Created |\n"))
-		sb.WriteString(fmt.Sprintf("|------|-------|----------|---------|\n"))
-		sb.WriteString(fmt.Sprintf("| `%s`%s | **%.2f** | %d times | %s |\n\n", r.Type, topic, r.Score, r.AccessCount, r.CreatedAt))
-		sb.WriteString(fmt.Sprintf("> %s\n", preview))
-		if i < len(results)-1 {
-			sb.WriteString("\n---\n\n")
-		} else {
-			sb.WriteString("\n")
-		}
+	sb.WriteString(fmt.Sprintf("**Search (%d results):**\n\n", len(results)))
+	for _, r := range results {
+		preview := searchResultBody(r.Content, includeFull, 150)
+		sb.WriteString(fmt.Sprintf("#%d %s — %s (score: %.2f)\n", r.ID, r.Type, r.Title, r.Score))
+		sb.WriteString(fmt.Sprintf("> %s\n\n", preview))
 	}
 
 	return mcp.NewToolResultText(sb.String()), nil
+}
+
+func (s *Server) handleToolGuide(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return mcp.NewToolResultText(ToolGuideMarkdown), nil
 }
 
 func (s *Server) handleUpdate(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -423,6 +448,11 @@ func (s *Server) handleGetObservation(_ context.Context, request mcp.CallToolReq
 
 func (s *Server) handleContext(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	project := strArg(request, "project")
+	if project == "" {
+		if cwd, err := os.Getwd(); err == nil {
+			project = inferProjectName(cwd)
+		}
+	}
 	limit := intArg(request, "limit", 20)
 
 	obs, err := s.store.RecentContext(project, limit)
@@ -435,21 +465,14 @@ func (s *Server) handleContext(_ context.Context, request mcp.CallToolRequest) (
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("# Recent Context\n\n> **%d** observations\n\n---\n\n", len(obs)))
-	sb.WriteString("| # | Type | Title | Date |\n")
-	sb.WriteString("|---|------|-------|------|\n")
+	sb.WriteString(fmt.Sprintf("**Context (%d):**\n\n", len(obs)))
 	for _, o := range obs {
 		date := o.CreatedAt
 		if len(date) >= 10 {
 			date = date[:10]
 		}
-		sb.WriteString(fmt.Sprintf("| **%d** | `%s` | %s | %s |\n", o.ID, o.Type, o.Title, date))
-	}
-	sb.WriteString("\n---\n\n")
-	// Detail section with previews
-	for _, o := range obs {
-		preview := truncate(o.Content, 200)
-		sb.WriteString(fmt.Sprintf("**#%d** — %s\n> %s\n\n", o.ID, o.Title, preview))
+		preview := truncate(o.Content, 150)
+		sb.WriteString(fmt.Sprintf("#%d %s [%s] — %s\n> %s\n\n", o.ID, o.Type, date, o.Title, preview))
 	}
 	return mcp.NewToolResultText(sb.String()), nil
 }
@@ -465,25 +488,27 @@ func (s *Server) handleTimeline(_ context.Context, request mcp.CallToolRequest) 
 	}
 
 	var sb strings.Builder
-	sb.WriteString("# Timeline\n\n---\n\n")
+	sb.WriteString("**Timeline:**\n\n")
 	for _, e := range entries {
-		preview := truncate(e.Content, 150)
 		date := e.CreatedAt
 		if len(date) >= 16 {
 			date = date[:16]
 		}
 		if e.IsFocus {
-			sb.WriteString(fmt.Sprintf("### >>> #%d — %s\n\n", e.ID, e.Title))
-			sb.WriteString(fmt.Sprintf("| Type | Date |\n|------|------|\n| `%s` | %s |\n\n", e.Type, date))
-			sb.WriteString(fmt.Sprintf("> **%s**\n\n", preview))
+			preview := truncate(e.Content, 150)
+			sb.WriteString(fmt.Sprintf(">>> #%d %s [%s] — %s\n> %s\n\n", e.ID, e.Type, date, e.Title, preview))
 		} else {
-			sb.WriteString(fmt.Sprintf("**#%d** `%s` %s — _%s_\n> %s\n\n", e.ID, e.Type, e.Title, date, preview))
+			preview := truncate(e.Content, 100)
+			sb.WriteString(fmt.Sprintf("#%d %s [%s] — %s\n> %s\n\n", e.ID, e.Type, date, e.Title, preview))
 		}
 	}
 	return mcp.NewToolResultText(sb.String()), nil
 }
 
 func (s *Server) handleSessionStart(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if err := sessionSubagentGuard(request); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 	id := uuid.New().String()
 	project := strArg(request, "project")
 	directory := strArg(request, "directory")
@@ -495,6 +520,9 @@ func (s *Server) handleSessionStart(_ context.Context, request mcp.CallToolReque
 }
 
 func (s *Server) handleSessionEnd(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if err := sessionSubagentGuard(request); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 	sessionID := strArg(request, "session_id")
 	summary := strArg(request, "summary")
 
@@ -510,7 +538,15 @@ func (s *Server) handleSessionEnd(_ context.Context, request mcp.CallToolRequest
 }
 
 func (s *Server) handleSessionSummary(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if err := sessionSubagentGuard(request); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 	project := strArg(request, "project")
+	if project == "" {
+		if cwd, err := os.Getwd(); err == nil {
+			project = inferProjectName(cwd)
+		}
+	}
 	limit := intArg(request, "limit", 10)
 
 	sessions, err := s.store.RecentSessions(project, limit)
@@ -523,9 +559,7 @@ func (s *Server) handleSessionSummary(_ context.Context, request mcp.CallToolReq
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("# Sessions\n\n> **%d** recent sessions\n\n---\n\n", len(sessions)))
-	sb.WriteString("| Session | Status | Project | Memories | Started |\n")
-	sb.WriteString("|---------|--------|---------|----------|---------|\n")
+	sb.WriteString(fmt.Sprintf("**Sessions (%d):**\n\n", len(sessions)))
 	for _, sess := range sessions {
 		status := "active"
 		if sess.EndedAt != nil {
@@ -535,20 +569,12 @@ func (s *Server) handleSessionSummary(_ context.Context, request mcp.CallToolReq
 		if len(started) >= 10 {
 			started = started[:10]
 		}
-		sb.WriteString(fmt.Sprintf("| `%s` | **%s** | %s | %d | %s |\n",
+		sb.WriteString(fmt.Sprintf("`%s` %s | %s | %d memories | %s\n",
 			sess.ID[:8], status, sess.Project, sess.ObservationCount, started))
-	}
-	sb.WriteString("\n---\n\n")
-	// Summaries section
-	hasSummaries := false
-	for _, sess := range sessions {
 		if sess.Summary != nil {
-			if !hasSummaries {
-				sb.WriteString("### Summaries\n\n")
-				hasSummaries = true
-			}
-			sb.WriteString(fmt.Sprintf("**`%s`** (%s)\n> %s\n\n", sess.ID[:8], sess.Project, truncate(*sess.Summary, 200)))
+			sb.WriteString(fmt.Sprintf("> %s\n", truncate(*sess.Summary, 100)))
 		}
+		sb.WriteString("\n")
 	}
 	return mcp.NewToolResultText(sb.String()), nil
 }
@@ -580,7 +606,7 @@ func (s *Server) handleRelations(_ context.Context, request mcp.CallToolRequest)
 	rels, _ := s.store.GetRelations(id)
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("# Relations for #%d\n\n> **%d** connected memories\n\n---\n\n", id, len(related)))
+	sb.WriteString(fmt.Sprintf("**Relations for #%d (%d):**\n\n", id, len(related)))
 
 	relMap := map[int64]string{}
 	for _, r := range rels {
@@ -591,16 +617,10 @@ func (s *Server) handleRelations(_ context.Context, request mcp.CallToolRequest)
 		relMap[other] = r.Type
 	}
 
-	sb.WriteString("| Relation | # | Type | Title |\n")
-	sb.WriteString("|----------|---|------|-------|\n")
 	for _, o := range related {
 		relType := relMap[o.ID]
-		sb.WriteString(fmt.Sprintf("| `%s` | **%d** | `%s` | %s |\n", relType, o.ID, o.Type, o.Title))
-	}
-	sb.WriteString("\n---\n\n")
-	for _, o := range related {
-		preview := truncate(o.Content, 150)
-		sb.WriteString(fmt.Sprintf("**#%d** — %s\n> %s\n\n", o.ID, o.Title, preview))
+		preview := truncate(o.Content, 100)
+		sb.WriteString(fmt.Sprintf("%s → #%d %s — %s\n> %s\n\n", relType, o.ID, o.Type, o.Title, preview))
 	}
 	return mcp.NewToolResultText(sb.String()), nil
 }
@@ -661,7 +681,6 @@ func (s *Server) handleStats(_ context.Context, _ mcp.CallToolRequest) (*mcp.Cal
 	}
 
 	var sb strings.Builder
-	sb.WriteString("# Mio Stats\n\n---\n\n")
 	sb.WriteString("| Metric | Value |\n")
 	sb.WriteString("|--------|-------|\n")
 	sb.WriteString(fmt.Sprintf("| Observations | **%d** |\n", metrics.TotalObservations))
@@ -687,9 +706,8 @@ func (s *Server) handleStats(_ context.Context, _ mcp.CallToolRequest) (*mcp.Cal
 func (s *Server) handleSurface(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	text := strArg(request, "text")
 	project := strArg(request, "project")
-	limit := intArg(request, "limit", 5)
+	limit := intArg(request, "limit", 3)
 
-	// Auto-detect project from working directory if not specified
 	if project == "" {
 		if cwd, err := os.Getwd(); err == nil {
 			project = inferProjectName(cwd)
@@ -702,47 +720,14 @@ func (s *Server) handleSurface(_ context.Context, request mcp.CallToolRequest) (
 	}
 
 	if len(results) == 0 {
-		return mcp.NewToolResultText("No relevant memories to surface."), nil
+		return mcp.NewToolResultText("No relevant memories."), nil
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("# Surfaced Memories\n\n> **%d** relevant matches\n\n---\n\n", len(results)))
-	for i, r := range results {
-		preview := truncate(r.Content, 300)
-		sb.WriteString(fmt.Sprintf("### #%d — %s\n\n", r.ID, r.Title))
-		sb.WriteString("| Type | Relevance |")
-		if r.Agent != "" {
-			sb.WriteString(" Agent |")
-		}
-		sb.WriteString("\n|------|-----------|")
-		if r.Agent != "" {
-			sb.WriteString("-------|")
-		}
-		sb.WriteString(fmt.Sprintf("\n| `%s` | **%.2f** |", r.Type, r.Score))
-		if r.Agent != "" {
-			sb.WriteString(fmt.Sprintf(" `%s` |", r.Agent))
-		}
-		sb.WriteString("\n\n")
-		sb.WriteString(fmt.Sprintf("> %s\n", preview))
-		// Show connected memories (relations)
-		if rels, err := s.store.GetRelations(r.ID); err == nil && len(rels) > 0 {
-			sb.WriteString("\n**Related:** ")
-			relStrs := make([]string, 0, len(rels))
-			for _, rel := range rels {
-				otherID := rel.ToID
-				if otherID == r.ID {
-					otherID = rel.FromID
-				}
-				relStrs = append(relStrs, fmt.Sprintf("`#%d` (%s)", otherID, rel.Type))
-			}
-			sb.WriteString(strings.Join(relStrs, " · "))
-			sb.WriteString("\n")
-		}
-		if i < len(results)-1 {
-			sb.WriteString("\n---\n\n")
-		} else {
-			sb.WriteString("\n")
-		}
+	sb.WriteString(fmt.Sprintf("**Surfaced (%d):**\n\n", len(results)))
+	for _, r := range results {
+		preview := truncate(r.Content, 150)
+		sb.WriteString(fmt.Sprintf("#%d %s:%.1f — %s\n> %s\n\n", r.ID, r.Type, r.Score, r.Title, preview))
 	}
 	return mcp.NewToolResultText(sb.String()), nil
 }
@@ -761,24 +746,14 @@ func (s *Server) handleCrossProject(_ context.Context, request mcp.CallToolReque
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("# Cross-Project Search\n\n> **%d** results across projects\n\n---\n\n", len(results)))
-	sb.WriteString("| # | Project | Type | Score | Title |\n")
-	sb.WriteString("|---|---------|------|-------|-------|\n")
+	sb.WriteString(fmt.Sprintf("**Cross-project (%d):**\n\n", len(results)))
 	for _, r := range results {
 		project := "—"
 		if r.Project != nil {
 			project = *r.Project
 		}
-		sb.WriteString(fmt.Sprintf("| **%d** | `%s` | `%s` | %.2f | %s |\n", r.ID, project, r.Type, r.Score, r.Title))
-	}
-	sb.WriteString("\n---\n\n")
-	for _, r := range results {
-		preview := truncate(r.Content, 250)
-		project := "—"
-		if r.Project != nil {
-			project = *r.Project
-		}
-		sb.WriteString(fmt.Sprintf("**#%d** [%s] — %s\n> %s\n\n", r.ID, project, r.Title, preview))
+		preview := truncate(r.Content, 150)
+		sb.WriteString(fmt.Sprintf("#%d [%s] %s:%.2f — %s\n> %s\n\n", r.ID, project, r.Type, r.Score, r.Title, preview))
 	}
 	return mcp.NewToolResultText(sb.String()), nil
 }
@@ -804,6 +779,18 @@ func (s *Server) handleGC(_ context.Context, request mcp.CallToolRequest) (*mcp.
 	return mcp.NewToolResultText(fmt.Sprintf("GC complete: %d memories decayed, %d archived", decayed, archived)), nil
 }
 
+func (s *Server) handleSummarize(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	project := strArg(request, "project")
+	ageDays := intArg(request, "age_days", 30)
+	maxLen := intArg(request, "max_len", 200)
+
+	count, err := s.store.Summarize(project, ageDays, maxLen)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("Summarized %d memories (older than %d days, content > %d chars)", count, ageDays, maxLen)), nil
+}
+
 func (s *Server) handleGraph(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	id := int64(intArg(request, "id", 0))
 	depth := intArg(request, "depth", 3)
@@ -822,6 +809,7 @@ func (s *Server) handleEnhancedSearch(_ context.Context, request mcp.CallToolReq
 	project := strArg(request, "project")
 	obsType := strArg(request, "type")
 	limit := intArg(request, "limit", 20)
+	includeFull := boolArg(request, "include_full")
 
 	results, err := s.store.EnhancedSearch(query, project, obsType, limit)
 	if err != nil {
@@ -835,7 +823,7 @@ func (s *Server) handleEnhancedSearch(_ context.Context, request mcp.CallToolReq
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("# Enhanced Search\n\n> **%d** results (TF-IDF ranked)\n\n---\n\n", len(results)))
 	for i, r := range results {
-		preview := truncate(r.Content, 300)
+		preview := searchResultBody(r.Content, includeFull, 300)
 		agent := ""
 		if r.Agent != "" {
 			agent = fmt.Sprintf(" | Agent: `%s`", r.Agent)
@@ -976,6 +964,30 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+const searchFullContentMax = 12000
+
+func searchResultBody(content string, includeFull bool, previewLen int) string {
+	if includeFull {
+		return truncate(content, searchFullContentMax)
+	}
+	return truncate(content, previewLen)
+}
+
+func subagentSessionsBlocked() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("MIO_SUBAGENT")))
+	return v == "1" || v == "true" || v == "yes"
+}
+
+func sessionSubagentGuard(req mcp.CallToolRequest) error {
+	if !subagentSessionsBlocked() {
+		return nil
+	}
+	if boolArg(req, "force") {
+		return nil
+	}
+	return errors.New("blocked: MIO_SUBAGENT is set — nested agents must not start or end sessions (session explosion). Top-level agent only. Pass force=true to override, or unset MIO_SUBAGENT.")
 }
 
 // inferProjectName extracts a project name from a directory path.

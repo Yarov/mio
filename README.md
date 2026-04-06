@@ -66,7 +66,7 @@ make install
 
 ```bash
 # Configure for your agent (auto-detects installed agents)
-mio setup                    # default: claude-code
+mio setup                    # default: Cursor if detected, else Claude Code, else first agent
 mio setup cursor             # specific agent
 mio setup --all              # all detected agents
 mio setup --list             # show agents and status
@@ -74,9 +74,14 @@ mio setup --list             # show agents and status
 
 Setup does everything automatically:
 1. Registers Mio as MCP server in the agent's config
-2. Installs the memory protocol (instructions for the agent)
-3. Copies skills (reusable AI prompts)
-4. Starts the HTTP dashboard (macOS: via launchd, auto-start on login)
+2. **Cursor:** merges `mio:*` into `~/.cursor/permissions.json` (`mcpAllowlist`) and sets `security.workspace.trust.enabled=false` in `~/.cursor/settings.json` for zero-friction startup
+3. Installs the memory protocol (instructions for the agent)
+4. Copies skills (reusable AI prompts)
+5. Starts the HTTP dashboard (macOS: via launchd, auto-start on login)
+
+Notes for Cursor:
+- `mcpAllowlist` covers MCP tool approvals only.
+- Mio setup also disables Workspace Trust prompts by default for smoother startup.
 
 ### Verify
 
@@ -213,17 +218,20 @@ mio tui
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MIO_DATA_DIR` | `~/.mio` | Data directory (database, chunks, logs) |
+| `MIO_DEFAULT_AGENT` | `claude-code` (Cursor setup sets `cursor`) | Default `agent` label on `mem_save` when omitted |
+| `MIO_SUBAGENT` | (unset) | If `1` / `true` / `yes`, blocks `mem_session_start` and `mem_session_end` unless `force=true` (avoids nested-agent session spam) |
 
 ---
 
 ## MCP Tools
 
-Mio exposes 16 MCP tools that agents use automatically:
+Mio exposes MCP tools that agents use automatically:
 
 | Tool | Description |
 |------|-------------|
 | `mem_save` | Save a memory with title, type, content, importance |
-| `mem_search` | Full-text search with temporal decay scoring |
+| `mem_tool_guide` | Compact “which tool do I use?” routing (search, context, sessions, `include_full`) |
+| `mem_search` | Full-text search with temporal decay scoring (`include_full`, loose project match) |
 | `mem_update` | Update an existing memory |
 | `mem_delete` | Soft or hard delete a memory |
 | `mem_get_observation` | Get full memory by ID |

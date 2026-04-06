@@ -120,10 +120,7 @@ func (s *Store) Consolidate(project string) (int, error) {
 	       FROM observations
 	       WHERE deleted_at IS NULL AND topic_key IS NOT NULL AND topic_key != ''`
 	args := []interface{}{}
-	if project != "" {
-		q += ` AND project = ?`
-		args = append(args, project)
-	}
+	q, args = appendProjectFilter(q, args, "project", project)
 	q += ` GROUP BY topic_key HAVING cnt >= 3`
 
 	topicRows, err := s.db.Query(q, args...)
@@ -156,10 +153,7 @@ func (s *Store) Consolidate(project string) (int, error) {
 		obsQ := `SELECT ` + obsColumns + ` FROM observations
 		         WHERE deleted_at IS NULL AND topic_key = ?`
 		obsArgs := []interface{}{g.topicKey}
-		if project != "" {
-			obsQ += ` AND project = ?`
-			obsArgs = append(obsArgs, project)
-		}
+		obsQ, obsArgs = appendProjectFilter(obsQ, obsArgs, "project", project)
 		obsQ += ` ORDER BY created_at DESC`
 
 		obsRows, err := s.db.Query(obsQ, obsArgs...)
@@ -417,9 +411,14 @@ func (s *Store) SurfaceRelevant(text string, project string, limit int) ([]Searc
 		limit = 3
 	}
 
+	// Short messages rarely need surfacing
+	if len(text) < 20 {
+		return nil, nil
+	}
+
 	// Extract meaningful keywords
 	keywords := extractKeywords(text)
-	if len(keywords) == 0 {
+	if len(keywords) < 2 {
 		return nil, nil
 	}
 
@@ -447,10 +446,7 @@ func (s *Store) SurfaceRelevant(text string, project string, limit int) ([]Searc
 	      WHERE observations_fts MATCH ? AND o.deleted_at IS NULL`
 	args := []interface{}{ftsQuery}
 
-	if project != "" {
-		q += ` AND o.project = ?`
-		args = append(args, project)
-	}
+	q, args = appendProjectFilter(q, args, "o.project", project)
 
 	q += ` ORDER BY rank LIMIT ?`
 	args = append(args, limit*5) // fetch extra for re-ranking
@@ -518,10 +514,10 @@ func (s *Store) SurfaceRelevant(text string, project string, limit int) ([]Searc
 		}
 	}
 
-	// Filter by threshold (normalized scale: 5% of max) and cap at limit
+	// Filter by threshold (normalized scale: top 50% of max) and cap at limit
 	var filtered []SearchResult
 	for _, r := range results {
-		if r.Score > 0.5 {
+		if r.Score > 5.0 {
 			filtered = append(filtered, r)
 		}
 		if len(filtered) >= limit {
@@ -530,6 +526,129 @@ func (s *Store) SurfaceRelevant(text string, project string, limit int) ([]Searc
 	}
 
 	return filtered, nil
+}
+
+// Summarize compresses old memories by truncating content to a summary.
+// Memories older than ageDays with content longer than maxLen get truncated.
+// The original content is preserved in the first line as a hash for dedup.
+// Returns (summarized count, error).
+func (s *Store) Summarize(project string, ageDays int, maxLen int) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if ageDays <= 0 {
+		ageDays = 30
+	}
+	if maxLen <= 0 {
+		maxLen = 200
+	}
+
+	cutoff := time.Now().UTC().AddDate(0, 0, -ageDays).Format(time.RFC3339)
+	nowStr := time.Now().UTC().Format(time.RFC3339)
+
+	q := `SELECT ` + obsColumns + ` FROM observations
+	      WHERE deleted_at IS NULL AND created_at < ? AND LENGTH(content) > ?`
+	args := []interface{}{cutoff, maxLen}
+	q, args = appendProjectFilter(q, args, "project", project)
+
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("query old observations: %w", err)
+	}
+	defer rows.Close()
+
+	var toSummarize []Observation
+	for rows.Next() {
+		var obs Observation
+		var sessionID sql.NullString
+		if err := rows.Scan(scanObsFields(&obs, &sessionID)...); err != nil {
+			return 0, fmt.Errorf("scan observation: %w", err)
+		}
+		obs.SessionID = sessionID.String
+		// Skip already summarized (contains marker)
+		if strings.HasPrefix(obs.Content, "[summarized]") {
+			continue
+		}
+		toSummarize = append(toSummarize, obs)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("iterate observations: %w", err)
+	}
+
+	count := 0
+	for _, obs := range toSummarize {
+		// Extract first meaningful lines up to maxLen
+		summary := extractSummary(obs.Content, maxLen)
+		compressed := fmt.Sprintf("[summarized] %s", summary)
+
+		_, err := s.db.Exec(
+			`UPDATE observations SET content = ?, updated_at = ? WHERE id = ?`,
+			compressed, nowStr, obs.ID,
+		)
+		if err != nil {
+			return count, fmt.Errorf("summarize observation %d: %w", obs.ID, err)
+		}
+		count++
+	}
+
+	return count, nil
+}
+
+// extractSummary takes content and returns a compressed version up to maxLen chars.
+// It preserves the structured format (What/Why/Learned lines) and drops details.
+func extractSummary(content string, maxLen int) string {
+	lines := strings.Split(content, "\n")
+	var summary []string
+	totalLen := 0
+
+	// Priority: keep lines starting with What:, Why:, Learned:, Where:
+	priority := []string{"What:", "Why:", "Learned:", "Where:"}
+	for _, prefix := range priority {
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, prefix) {
+				if totalLen+len(trimmed) > maxLen {
+					remaining := maxLen - totalLen
+					if remaining > 20 {
+						summary = append(summary, trimmed[:remaining]+"...")
+					}
+					return strings.Join(summary, "\n")
+				}
+				summary = append(summary, trimmed)
+				totalLen += len(trimmed) + 1
+			}
+		}
+	}
+
+	// If still under maxLen, add remaining non-empty lines
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		// Skip lines already added
+		isPriority := false
+		for _, prefix := range priority {
+			if strings.HasPrefix(trimmed, prefix) {
+				isPriority = true
+				break
+			}
+		}
+		if isPriority {
+			continue
+		}
+		if totalLen+len(trimmed) > maxLen {
+			remaining := maxLen - totalLen
+			if remaining > 20 {
+				summary = append(summary, trimmed[:remaining]+"...")
+			}
+			break
+		}
+		summary = append(summary, trimmed)
+		totalLen += len(trimmed) + 1
+	}
+
+	return strings.Join(summary, "\n")
 }
 
 // extractKeywords splits text into meaningful keywords for search.

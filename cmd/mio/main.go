@@ -13,7 +13,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	_ "mio/internal/agents" // register all agents via init()
+	"mio/internal/agents" // register all agents via init()
 	"mio/internal/config"
 	"mio/internal/mcp"
 	"mio/internal/server"
@@ -95,10 +95,10 @@ Usage: mio <command> [args]
 
 Commands:
   tui                  Launch interactive terminal UI
-  setup [agent]        Configure Mio for an agent (default: claude-code)
+  setup [agent]        Configure Mio for an agent (default: cursor if present, else claude-code)
   setup --all          Configure Mio for all detected agents
   setup --list         Show all supported agents and status
-  uninstall [agent]    Remove Mio from an agent (default: claude-code)
+  uninstall [agent]    Remove Mio from an agent (default: configured agent, else same as setup)
   uninstall --all      Remove Mio from all configured agents
   uninstall --purge    Also delete data (~/.mio)
   mcp                  Start MCP stdio server (for agent integration)
@@ -175,7 +175,7 @@ func runUninstall(args []string) {
 	}
 
 	if agent == "" {
-		agent = "claude-code"
+		agent = agents.DefaultUninstallAgent()
 	}
 	if err := setup.Uninstall(agent, purge); err != nil {
 		fmt.Fprintf(os.Stderr, "uninstall error: %v\n", err)
@@ -195,7 +195,7 @@ func runSetup(args []string) {
 		}
 	}
 
-	agent := "claude-code"
+	agent := agents.DefaultSetupAgent()
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		agent = args[0]
 	}

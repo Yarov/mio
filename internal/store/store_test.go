@@ -516,6 +516,30 @@ func TestSearch_FilterByProject(t *testing.T) {
 	}
 }
 
+func TestSearch_FuzzyProjectFilter(t *testing.T) {
+	s := testStore(t)
+
+	storedName := "element-adds"
+	obs := testObs("Mio test", "Content about fuzzy project keys")
+	obs.Project = &storedName
+	if _, err := s.Save(obs); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, variant := range []string{"elementAdds", "ELEMENT_ADDS", "elementadds"} {
+		results, err := s.Search("fuzzy", variant, "", 10)
+		if err != nil {
+			t.Fatalf("variant %q: %v", variant, err)
+		}
+		if len(results) != 1 {
+			t.Fatalf("variant %q: want 1 result, got %d", variant, len(results))
+		}
+		if results[0].Title != "Mio test" {
+			t.Errorf("variant %q: title = %q", variant, results[0].Title)
+		}
+	}
+}
+
 func TestSearch_FilterByType(t *testing.T) {
 	s := testStore(t)
 

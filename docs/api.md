@@ -329,7 +329,7 @@ curl http://localhost:7438/agents
 
 ### POST /admin/setup?agent={name}
 
-Setup Mio for a specific agent.
+Setup Mio for a specific agent. If `agent` is omitted, the server uses the same default as `mio setup` (prefers Cursor when detected, then Claude Code, then the first detected agent).
 
 ```bash
 curl -X POST "http://localhost:7438/admin/setup?agent=cursor"

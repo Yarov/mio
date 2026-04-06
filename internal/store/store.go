@@ -223,13 +223,16 @@ func (s *Store) autoMaintenance() {
 	// Run consolidation for all projects
 	consolidated, _ := s.Consolidate("")
 
+	// Summarize old memories to reduce token costs
+	summarized, _ := s.Summarize("", 30, 200)
+
 	// Update timestamp
 	now := time.Now().UTC().Format(time.RFC3339)
 	s.db.Exec(`INSERT OR REPLACE INTO kv_meta (key, value) VALUES ('last_maintenance', ?)`, now)
 
 	// Log results if anything happened
-	if decayed > 0 || archived > 0 || consolidated > 0 {
-		summary := fmt.Sprintf("Auto-maintenance: decayed %d, archived %d, consolidated %d", decayed, archived, consolidated)
+	if decayed > 0 || archived > 0 || consolidated > 0 || summarized > 0 {
+		summary := fmt.Sprintf("Auto-maintenance: decayed %d, archived %d, consolidated %d, summarized %d", decayed, archived, consolidated, summarized)
 		s.db.Exec(`INSERT OR REPLACE INTO kv_meta (key, value) VALUES ('last_maintenance_result', ?)`, summary)
 	}
 }
@@ -642,10 +645,7 @@ func (s *Store) RecentSessions(project string, limit int) ([]SessionSummary, err
 		FROM sessions s WHERE 1=1`
 	args := []interface{}{}
 
-	if project != "" {
-		query += " AND s.project = ?"
-		args = append(args, project)
-	}
+	query, args = appendProjectFilter(query, args, "s.project", project)
 	query += " ORDER BY s.started_at DESC LIMIT ?"
 	args = append(args, limit)
 
@@ -989,10 +989,7 @@ func (s *Store) Search(query string, project string, obsType string, limit int) 
 			WHERE observations_fts MATCH ? AND o.deleted_at IS NULL`
 		args := []interface{}{sanitized}
 
-		if project != "" {
-			q += " AND o.project = ?"
-			args = append(args, project)
-		}
+		q, args = appendProjectFilter(q, args, "o.project", project)
 		if obsType != "" {
 			q += " AND o.type = ?"
 			args = append(args, obsType)
@@ -1087,10 +1084,7 @@ func (s *Store) searchByTopicKey(query, project, obsType string, limit int) ([]S
 		FROM observations WHERE topic_key LIKE ? AND deleted_at IS NULL`
 	args := []interface{}{"%" + query + "%"}
 
-	if project != "" {
-		q += " AND project = ?"
-		args = append(args, project)
-	}
+	q, args = appendProjectFilter(q, args, "project", project)
 	if obsType != "" {
 		q += " AND type = ?"
 		args = append(args, obsType)
@@ -1149,10 +1143,7 @@ func (s *Store) RecentContext(project string, limit int) ([]Observation, error) 
 	q := `SELECT ` + obsColumns + ` FROM observations WHERE deleted_at IS NULL`
 	args := []interface{}{}
 
-	if project != "" {
-		q += " AND project = ?"
-		args = append(args, project)
-	}
+	q, args = appendProjectFilter(q, args, "project", project)
 
 	q += " ORDER BY created_at DESC LIMIT ?"
 	args = append(args, limit)
@@ -1282,10 +1273,7 @@ func (s *Store) autoRelateBySimilarity(newID int64, obs *Observation) {
 
 	q := `SELECT id, title, content FROM observations WHERE id != ? AND deleted_at IS NULL`
 	args := []interface{}{newID}
-	if project != "" {
-		q += ` AND project = ?`
-		args = append(args, project)
-	}
+	q, args = appendProjectFilter(q, args, "project", project)
 	q += ` ORDER BY created_at DESC LIMIT 50`
 
 	rows, err := s.db.Query(q, args...)
@@ -1475,8 +1463,8 @@ func (s *Store) ExportAll(project string) (*ExportData, error) {
 	sessQ := `SELECT id, project, directory, started_at, ended_at, summary FROM sessions`
 	sessArgs := []interface{}{}
 	if project != "" {
-		sessQ += " WHERE project = ?"
-		sessArgs = append(sessArgs, project)
+		sessQ += " WHERE 1=1"
+		sessQ, sessArgs = appendProjectFilter(sessQ, sessArgs, "project", project)
 	}
 	rows, err := s.db.Query(sessQ, sessArgs...)
 	if err != nil {
@@ -1495,8 +1483,8 @@ func (s *Store) ExportAll(project string) (*ExportData, error) {
 	obsQ := `SELECT ` + obsColumns + ` FROM observations`
 	obsArgs := []interface{}{}
 	if project != "" {
-		obsQ += " WHERE project = ?"
-		obsArgs = append(obsArgs, project)
+		obsQ += " WHERE 1=1"
+		obsQ, obsArgs = appendProjectFilter(obsQ, obsArgs, "project", project)
 	}
 	obs, err := s.queryObservations(obsQ, obsArgs...)
 	if err != nil {
@@ -1508,8 +1496,8 @@ func (s *Store) ExportAll(project string) (*ExportData, error) {
 	promptQ := `SELECT id, sync_id, session_id, content, project, created_at FROM user_prompts`
 	promptArgs := []interface{}{}
 	if project != "" {
-		promptQ += " WHERE project = ?"
-		promptArgs = append(promptArgs, project)
+		promptQ += " WHERE 1=1"
+		promptQ, promptArgs = appendProjectFilter(promptQ, promptArgs, "project", project)
 	}
 	pRows, err := s.db.Query(promptQ, promptArgs...)
 	if err != nil {

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -34,12 +33,11 @@ var mioTools = []string{
 	"mcp__mio__mem_cross_project",
 	"mcp__mio__mem_consolidate",
 	"mcp__mio__mem_gc",
+	"mcp__mio__mem_summarize",
 	"mcp__mio__mem_graph",
 	"mcp__mio__mem_enhanced_search",
 	"mcp__mio__mem_agent_knowledge",
 }
-
-const launchdLabel = "com.mio.server"
 
 // ClaudeCode implements the Agent interface for Claude Code.
 type ClaudeCode struct{}
@@ -109,8 +107,8 @@ func (c *ClaudeCode) Setup(binPath string) error {
 		PrintStep("warn", fmt.Sprintf("Hooks: %v", err))
 	}
 
-	// 8. Install launchd
-	if err := c.installLaunchd(binPath); err != nil {
+	// 8. Install launchd (shared with Cursor setup)
+	if err := InstallLaunchd(binPath); err != nil {
 		PrintStep("warn", fmt.Sprintf("Launchd: %v", err))
 	}
 
@@ -154,10 +152,12 @@ func (c *ClaudeCode) Uninstall(purge bool) error {
 	// 7. Remove hooks from settings.json
 	c.removeHooksFromSettings(dir)
 
-	// 8. Remove launchd
-	c.uninstallLaunchd()
+	// 8. Remove launchd only if no other agent still uses Mio
+	if !otherAgentWantsLaunchd("claude-code") {
+		UninstallLaunchd()
+	}
 
-	// 8. Purge data
+	// 9. Purge data
 	if purge {
 		dataDir := filepath.Join(HomeDir(), ".mio")
 		if info, err := os.Stat(dataDir); err == nil && info.IsDir() {
@@ -628,63 +628,6 @@ func (c *ClaudeCode) installHooks(binPath, dir string) error {
 	return nil
 }
 
-func (c *ClaudeCode) installLaunchd(binPath string) error {
-	home := HomeDir()
-	agentsDir := filepath.Join(home, "Library", "LaunchAgents")
-	if err := os.MkdirAll(agentsDir, 0755); err != nil {
-		return err
-	}
-
-	plistPath := filepath.Join(agentsDir, launchdLabel+".plist")
-	logPath := filepath.Join(home, ".mio", "server.log")
-
-	plist := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>%s</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>%s</string>
-        <string>server</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>StandardOutPath</key>
-    <string>%s</string>
-    <key>StandardErrorPath</key>
-    <string>%s</string>
-</dict>
-</plist>
-`, launchdLabel, binPath, logPath, logPath)
-
-	if existing, err := os.ReadFile(plistPath); err == nil {
-		if string(existing) == plist {
-			PrintStep("ok", "Launchd service already installed")
-			return nil
-		}
-	}
-
-	if err := os.WriteFile(plistPath, []byte(plist), 0644); err != nil {
-		return err
-	}
-
-	unloadCmd := exec.Command("launchctl", "unload", plistPath)
-	unloadCmd.Run()
-
-	loadCmd := exec.Command("launchctl", "load", plistPath)
-	if out, err := loadCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("launchctl load: %s (%w)", string(out), err)
-	}
-
-	PrintStep("ok", fmt.Sprintf("Launchd service → %s", plistPath))
-	PrintStep("ok", "Dashboard will auto-start on login and stay alive")
-	return nil
-}
-
 func (c *ClaudeCode) removeHooksFromSettings(dir string) {
 	settingsPath := filepath.Join(dir, "settings.json")
 	data, err := os.ReadFile(settingsPath)
@@ -748,19 +691,5 @@ func (c *ClaudeCode) removeHooksFromSettings(dir string) {
 		out, _ := json.MarshalIndent(settings, "", "  ")
 		os.WriteFile(settingsPath, append(out, '\n'), 0644)
 		PrintStep("ok", "Removed hooks from settings.json")
-	}
-}
-
-func (c *ClaudeCode) uninstallLaunchd() {
-	home := HomeDir()
-	plistPath := filepath.Join(home, "Library", "LaunchAgents", launchdLabel+".plist")
-
-	unloadCmd := exec.Command("launchctl", "unload", plistPath)
-	unloadCmd.Run()
-
-	if err := os.Remove(plistPath); err == nil {
-		PrintStep("ok", "Removed launchd service")
-	} else if !os.IsNotExist(err) {
-		PrintStep("warn", fmt.Sprintf("Could not remove launchd plist: %v", err))
 	}
 }

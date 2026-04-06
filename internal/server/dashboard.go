@@ -40,33 +40,59 @@ type SkillInfo struct {
 	Version     string `json:"version"`
 }
 
-// scanSkills reads all installed skills from ~/.claude/skills/
-func scanSkills() []SkillInfo {
+// skillInstallDirs returns candidate skill roots in priority order (Cursor first, then Claude).
+func skillInstallDirs() []string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil
 	}
-
-	skillsDir := filepath.Join(home, ".claude", "skills")
-	entries, err := os.ReadDir(skillsDir)
-	if err != nil {
-		return nil
+	return []string{
+		filepath.Join(home, ".cursor", "skills"),
+		filepath.Join(home, ".claude", "skills"),
 	}
+}
 
-	var skills []SkillInfo
-	for _, entry := range entries {
-		if !entry.IsDir() || entry.Name() == "_shared" {
-			continue
+// findSkillMarkdown returns the path to {name}/SKILL.md under Cursor or Claude skills.
+func findSkillMarkdown(name string) string {
+	for _, root := range skillInstallDirs() {
+		p := filepath.Join(root, name, "SKILL.md")
+		if _, err := os.Stat(p); err == nil {
+			return p
 		}
+	}
+	return ""
+}
 
-		skillFile := filepath.Join(skillsDir, entry.Name(), "SKILL.md")
-		data, err := os.ReadFile(skillFile)
+// scanSkills reads installed skills from ~/.cursor/skills/ and ~/.claude/skills/.
+// When the same skill exists in both, the Cursor copy wins.
+func scanSkills() []SkillInfo {
+	var skills []SkillInfo
+	seen := make(map[string]struct{})
+
+	for _, skillsDir := range skillInstallDirs() {
+		entries, err := os.ReadDir(skillsDir)
 		if err != nil {
 			continue
 		}
 
-		skill := parseSkillFrontmatter(entry.Name(), string(data))
-		skills = append(skills, skill)
+		for _, entry := range entries {
+			if !entry.IsDir() || entry.Name() == "_shared" {
+				continue
+			}
+			if _, dup := seen[entry.Name()]; dup {
+				continue
+			}
+
+			skillFile := filepath.Join(skillsDir, entry.Name(), "SKILL.md")
+			data, err := os.ReadFile(skillFile)
+			if err != nil {
+				continue
+			}
+
+			skill := parseSkillFrontmatter(entry.Name(), string(data))
+			seen[entry.Name()] = struct{}{}
+			skills = append(skills, skill)
+		}
 	}
 
 	sort.Slice(skills, func(i, j int) bool {
@@ -206,8 +232,7 @@ func (s *HTTPServer) handleSkills(w http.ResponseWriter, _ *http.Request) {
 
 func (s *HTTPServer) handleSkillGet(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	home, _ := os.UserHomeDir()
-	path := filepath.Join(home, ".claude", "skills", name, "SKILL.md")
+	path := findSkillMarkdown(name)
 
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -224,8 +249,7 @@ func (s *HTTPServer) handleSkillGet(w http.ResponseWriter, r *http.Request) {
 
 func (s *HTTPServer) handleSkillUpdate(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	home, _ := os.UserHomeDir()
-	path := filepath.Join(home, ".claude", "skills", name, "SKILL.md")
+	path := findSkillMarkdown(name)
 
 	// Verify skill exists
 	if _, err := os.Stat(path); os.IsNotExist(err) {
@@ -262,7 +286,7 @@ func (s *HTTPServer) handleAdminSetup(w http.ResponseWriter, r *http.Request) {
 
 	agentName := r.URL.Query().Get("agent")
 	if agentName == "" {
-		agentName = "claude-code"
+		agentName = agents.DefaultSetupAgent()
 	}
 
 	exe, err := os.Executable()

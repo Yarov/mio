@@ -36,9 +36,9 @@ project:   {detected project name}
 
 ## Two-Step Retrieval (CRITICAL)
 
-`mcp__mio__mem_search` returns truncated previews. Always:
+`mem_search` (Mio MCP) returns truncated previews — in Claude Code the same tool appears as `mcp__mio__mem_search`. Always:
 1. Search → get observation ID
-2. `mcp__mio__mem_get_observation(id)` → full content
+2. `mem_get_observation(id)` (or `mcp__mio__mem_get_observation` in Claude Code) → full content
 
 **Never use search previews as source material.**
 
