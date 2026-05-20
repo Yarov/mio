@@ -6,10 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -240,9 +238,7 @@ func ensureDashboard(cfg *config.Config) {
 	}
 
 	cmd := exec.Command(binPath, "server", strconv.Itoa(cfg.HTTPPort))
-	if runtime.GOOS != "windows" {
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // detach from parent session (Unix only)
-	}
+	setSysProcAttr(cmd)
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	cmd.Stdin = nil
