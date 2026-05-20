@@ -106,9 +106,15 @@ main() {
     unzip -q "${TMPDIR}/${FILENAME}" -d "$TMPDIR"
   fi
 
+  # Find the binary (tar extracts to a subdirectory)
+  BINARY_PATH=$(find "$TMPDIR" -name "$BINARY" -type f -executable 2>/dev/null | head -1)
+  if [ -z "$BINARY_PATH" ]; then
+    error "Could not find $BINARY in extracted files"
+  fi
+
   # Install
   mkdir -p "$INSTALL_DIR"
-  cp "${TMPDIR}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
+  cp "$BINARY_PATH" "${INSTALL_DIR}/${BINARY}"
   chmod +x "${INSTALL_DIR}/${BINARY}"
 
   # Add to PATH if needed
