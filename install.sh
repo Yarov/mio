@@ -111,6 +111,20 @@ main() {
   cp "${TMPDIR}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
   chmod +x "${INSTALL_DIR}/${BINARY}"
 
+  # Add to PATH if needed
+  if [ "$INSTALL_DIR" = "${HOME}/.local/bin" ]; then
+    SHELL_RC="${HOME}/.zshrc"
+    if [ -f "${HOME}/.bashrc" ]; then
+      SHELL_RC="${HOME}/.bashrc"
+    fi
+    if ! grep -q '.local/bin' "$SHELL_RC" 2>/dev/null; then
+      echo '' >> "$SHELL_RC"
+      echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$SHELL_RC"
+      info "Added ~/.local/bin to PATH in $SHELL_RC"
+      info "Run 'source $SHELL_RC' or restart your terminal"
+    fi
+  fi
+
   # macOS: ad-hoc codesign
   if [ "$OS" = "darwin" ]; then
     codesign -f -s - "${INSTALL_DIR}/${BINARY}" 2>/dev/null || true
