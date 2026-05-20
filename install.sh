@@ -5,8 +5,17 @@
 set -e
 
 REPO="Yarov/mio"
-INSTALL_DIR="${MIO_INSTALL_DIR:-/usr/local/bin}"
+INSTALL_DIR="${MIO_INSTALL_DIR:-}"
 BINARY="mio"
+
+# Default to ~/.local/bin if INSTALL_DIR not set and /usr/local/bin not writable
+if [ -z "$INSTALL_DIR" ]; then
+  if [ -w "/usr/local/bin" ]; then
+    INSTALL_DIR="/usr/local/bin"
+  else
+    INSTALL_DIR="${HOME}/.local/bin"
+  fi
+fi
 
 # Colors
 RED='\033[0;31m'
@@ -98,16 +107,9 @@ main() {
   fi
 
   # Install
-  if [ ! -w "$INSTALL_DIR" ]; then
-    warn "Need sudo to install to ${INSTALL_DIR}"
-    sudo mkdir -p "$INSTALL_DIR"
-    sudo cp "${TMPDIR}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
-    sudo chmod +x "${INSTALL_DIR}/${BINARY}"
-  else
-    mkdir -p "$INSTALL_DIR"
-    cp "${TMPDIR}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
-    chmod +x "${INSTALL_DIR}/${BINARY}"
-  fi
+  mkdir -p "$INSTALL_DIR"
+  cp "${TMPDIR}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
+  chmod +x "${INSTALL_DIR}/${BINARY}"
 
   # macOS: ad-hoc codesign
   if [ "$OS" = "darwin" ]; then
