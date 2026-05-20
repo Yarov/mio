@@ -32,6 +32,8 @@ mcp__mio__mem_search(query: "sdd/{change-name}/proposal", project: "{project}") 
 mcp__mio__mem_get_observation(id: {id}) → full proposal (REQUIRED)
 ```
 
+If available, also retrieve `sdd/{change-name}/explore` for additional codebase context that informed the proposal.
+
 ### 2. Identify Affected Domains
 
 From the proposal's "Affected Areas", group changes by domain (auth/, payments/, ui/).

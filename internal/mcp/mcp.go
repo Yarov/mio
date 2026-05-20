@@ -41,12 +41,16 @@ func (s *Server) ServeStdio() error {
 
 func (s *Server) registerTools() {
 	// Tool loading strategy:
-	// EAGER (always in context): mem_save, mem_search, mem_get_observation, mem_context, mem_session_summary, mem_tool_guide
-	//   → Core tools needed every session
-	// DEFERRED (loaded on-demand via ToolSearch): mem_update, mem_delete, mem_timeline,
-	//   mem_session_start, mem_session_end, mem_save_prompt, mem_relations, mem_relate,
-	//   mem_suggest_topic_key, mem_stats
-	//   → Rarely used tools, ~40% token reduction at session startup
+	// EAGER (always in context, 10 tools): mem_save, mem_search, mem_get_observation,
+	//   mem_context, mem_session_start, mem_session_end, mem_session_summary,
+	//   mem_tool_guide, mem_surface
+	//   → Core tools needed every session (sessions are eager because protocols assume them)
+	// DEFERRED (loaded on-demand via ToolSearch, 19 tools): mem_update, mem_delete,
+	//   mem_timeline, mem_save_prompt, mem_relations, mem_relate, mem_suggest_topic_key,
+	//   mem_stats, mem_cross_project, mem_enhanced_search, mem_consolidate, mem_summarize,
+	//   mem_gc, mem_graph, mem_agent_knowledge, mem_routing_get, mem_routing_set,
+	//   mem_style_get, mem_style_set
+	//   → Rarely used tools, loaded on-demand to reduce session startup tokens
 
 	// --- Eager tools (always available) ---
 
@@ -55,11 +59,11 @@ func (s *Server) registerTools() {
 		mcp.NewTool("mem_save",
 			mcp.WithDescription("Save a memory/observation. Fields: title (action verb + what), type (bugfix|decision|architecture|discovery|pattern|config|preference|learning), content (structured What/Why/Where/Learned), session_id, project, scope (project|personal|global), topic_key (for evolving topics), importance (0.0-1.0)"),
 			mcp.WithString("title", mcp.Required(), mcp.Description("Brief title: action verb + what")),
-			mcp.WithString("type", mcp.Required(), mcp.Description("Type: bugfix, decision, architecture, discovery, pattern, config, preference, learning")),
+			mcp.WithString("type", mcp.Required(), mcp.Description("Type: bugfix, decision, architecture, discovery, pattern, config, preference, learning, summary"), mcp.Enum("bugfix", "decision", "architecture", "discovery", "pattern", "config", "preference", "learning", "summary")),
 			mcp.WithString("content", mcp.Required(), mcp.Description("Structured content with What/Why/Where/Learned")),
 			mcp.WithString("session_id", mcp.Description("Current session ID")),
 			mcp.WithString("project", mcp.Description("Project name")),
-			mcp.WithString("scope", mcp.Description("Scope: project, personal, or global")),
+			mcp.WithString("scope", mcp.Description("Scope: project, personal, or global"), mcp.Enum("project", "personal", "global")),
 			mcp.WithString("topic_key", mcp.Description("Stable key for evolving topics (enables upsert)")),
 			mcp.WithNumber("importance", mcp.Description("Importance 0.0-1.0, default 0.5")),
 			mcp.WithString("agent", mcp.Description("Agent name that created this memory (e.g. claude-code, cursor)")),
@@ -70,7 +74,7 @@ func (s *Server) registerTools() {
 	// mem_search
 	s.mcp.AddTool(
 		mcp.NewTool("mem_search",
-			mcp.WithDescription("Search memories using full-text search with temporal decay and importance weighting. Project filter matches loosely (my-app = MyApp). Previews are truncated unless include_full=true (caps long bodies). For authoritative text, still prefer mem_get_observation after search."),
+			mcp.WithDescription("Search memories using full-text search with temporal decay and importance weighting. Project filter matches loosely (my-app = MyApp). Previews are truncated unless include_full=true (caps long bodies). For authoritative text, still prefer mem_get_observation after search. Use when actively looking for specific memories matching a query."),
 			mcp.WithString("query", mcp.Required(), mcp.Description("Search query")),
 			mcp.WithString("project", mcp.Description("Filter by project")),
 			mcp.WithString("type", mcp.Description("Filter by observation type")),
@@ -93,7 +97,7 @@ func (s *Server) registerTools() {
 	// mem_update
 	s.mcp.AddTool(
 		mcp.NewTool("mem_update",
-			mcp.WithDescription("Update an existing memory by ID"),
+			mcp.WithDescription("Update an existing memory by ID. Prefer mem_save with topic_key for evolving topics (handles versioning automatically). Use mem_update only for direct corrections to existing observations."),
 			mcp.WithDeferLoading(true),
 			mcp.WithNumber("id", mcp.Required(), mcp.Description("Observation ID")),
 			mcp.WithString("title", mcp.Required(), mcp.Description("New title")),
@@ -144,11 +148,10 @@ func (s *Server) registerTools() {
 		s.handleTimeline,
 	)
 
-	// mem_session_start
+	// mem_session_start — eager (protocols assume always available)
 	s.mcp.AddTool(
 		mcp.NewTool("mem_session_start",
 			mcp.WithDescription("Register a new session. Blocked when env MIO_SUBAGENT is set (nested agents) unless force=true."),
-			mcp.WithDeferLoading(true),
 			mcp.WithString("project", mcp.Description("Project name")),
 			mcp.WithString("directory", mcp.Description("Working directory")),
 			mcp.WithBoolean("force", mcp.Description("Bypass MIO_SUBAGENT guard — only for the top-level agent")),
@@ -156,11 +159,10 @@ func (s *Server) registerTools() {
 		s.handleSessionStart,
 	)
 
-	// mem_session_end
+	// mem_session_end — eager (protocols assume always available)
 	s.mcp.AddTool(
 		mcp.NewTool("mem_session_end",
 			mcp.WithDescription("End a session with optional summary. Blocked when env MIO_SUBAGENT is set unless force=true."),
-			mcp.WithDeferLoading(true),
 			mcp.WithString("session_id", mcp.Required(), mcp.Description("Session ID")),
 			mcp.WithString("summary", mcp.Description("Session summary")),
 			mcp.WithBoolean("force", mcp.Description("Bypass MIO_SUBAGENT guard — only for the top-level agent")),
@@ -208,7 +210,7 @@ func (s *Server) registerTools() {
 			mcp.WithDeferLoading(true),
 			mcp.WithNumber("from_id", mcp.Required(), mcp.Description("Source observation ID")),
 			mcp.WithNumber("to_id", mcp.Required(), mcp.Description("Target observation ID")),
-			mcp.WithString("type", mcp.Required(), mcp.Description("Relation type: supersedes, relates_to, contradicts, builds_on, caused_by, resolved_by")),
+			mcp.WithString("type", mcp.Required(), mcp.Description("Relation type: supersedes, relates_to, contradicts, builds_on, caused_by, resolved_by"), mcp.Enum("supersedes", "relates_to", "contradicts", "builds_on", "caused_by", "resolved_by")),
 			mcp.WithNumber("strength", mcp.Description("Relation strength 0.0-1.0 (default 1.0)")),
 		),
 		s.handleRelate,
@@ -239,7 +241,7 @@ func (s *Server) registerTools() {
 	// mem_surface (Proactive Memory Surfacing) — eager, auto-invoked by hooks
 	s.mcp.AddTool(
 		mcp.NewTool("mem_surface",
-			mcp.WithDescription("Proactively surface relevant memories based on current context text. Returns top matches the agent should be reminded about. Project is auto-detected from working directory if not specified."),
+			mcp.WithDescription("Proactively surface relevant memories based on current context text. Returns top matches the agent should be reminded about. Project is auto-detected from working directory if not specified. Use when you want background context without a specific query — surfaces relevant memories from the current conversation text."),
 			mcp.WithString("text", mcp.Required(), mcp.Description("Current context/prompt text to find relevant memories for")),
 			mcp.WithString("project", mcp.Description("Filter by project (auto-detected from cwd if empty)")),
 			mcp.WithNumber("limit", mcp.Description("Max results (default 3)")),
@@ -327,6 +329,48 @@ func (s *Server) registerTools() {
 		),
 		s.handleAgentKnowledge,
 	)
+
+	// --- Routing & Style tools (deferred) ---
+
+	// mem_routing_get
+	s.mcp.AddTool(
+		mcp.NewTool("mem_routing_get",
+			mcp.WithDescription("Get current model routing configuration (available models, planning/execution defaults, cost mode)"),
+			mcp.WithDeferLoading(true),
+		),
+		s.handleMemRoutingGet,
+	)
+
+	// mem_routing_set
+	s.mcp.AddTool(
+		mcp.NewTool("mem_routing_set",
+			mcp.WithDescription("Set model routing configuration. Merges provided fields into current config."),
+			mcp.WithDeferLoading(true),
+			mcp.WithString("default_planning", mcp.Description("Default model for planning tasks")),
+			mcp.WithString("default_execution", mcp.Description("Default model for execution tasks")),
+			mcp.WithString("cost_mode", mcp.Description("Cost mode: economy, balanced, performance")),
+		),
+		s.handleMemRoutingSet,
+	)
+
+	// mem_style_get
+	s.mcp.AddTool(
+		mcp.NewTool("mem_style_get",
+			mcp.WithDescription("Get output style toggle state (enabled/disabled)"),
+			mcp.WithDeferLoading(true),
+		),
+		s.handleMemStyleGet,
+	)
+
+	// mem_style_set
+	s.mcp.AddTool(
+		mcp.NewTool("mem_style_set",
+			mcp.WithDescription("Set output style toggle state. Applies to installed agent settings files."),
+			mcp.WithDeferLoading(true),
+			mcp.WithBoolean("enabled", mcp.Required(), mcp.Description("Enable or disable output style")),
+		),
+		s.handleMemStyleSet,
+	)
 }
 
 // --- Handlers ---
@@ -369,7 +413,8 @@ func (s *Server) handleSave(_ context.Context, request mcp.CallToolRequest) (*mc
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	return mcp.NewToolResultText(fmt.Sprintf("Saved observation #%d (sync_id: %s)", id, obs.SyncID)), nil
+	result, _ := json.Marshal(map[string]interface{}{"id": id, "sync_id": obs.SyncID})
+	return mcp.NewToolResultText(string(result)), nil
 }
 
 func (s *Server) handleSearch(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -516,7 +561,8 @@ func (s *Server) handleSessionStart(_ context.Context, request mcp.CallToolReque
 	if err := s.store.CreateSession(id, project, directory); err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	return mcp.NewToolResultText(fmt.Sprintf("Session started: %s", id)), nil
+	result, _ := json.Marshal(map[string]string{"session_id": id})
+	return mcp.NewToolResultText(string(result)), nil
 }
 
 func (s *Server) handleSessionEnd(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -942,8 +988,17 @@ func intArg(req mcp.CallToolRequest, name string, defaultVal int) int {
 func numArgDefault(req mcp.CallToolRequest, name string, defaultVal float64) float64 {
 	args := req.GetArguments()
 	if v, ok := args[name]; ok {
-		if n, ok := v.(float64); ok {
+		switch n := v.(type) {
+		case float64:
 			return n
+		case int:
+			return float64(n)
+		case string:
+			// Handle string-typed numeric params (some MCP clients send numbers as strings)
+			var parsed float64
+			if _, err := fmt.Sscanf(n, "%f", &parsed); err == nil {
+				return parsed
+			}
 		}
 	}
 	return defaultVal

@@ -534,11 +534,13 @@ func (c *ClaudeCode) installHooks(binPath, dir string) error {
 
 	hookFiles := []string{"user-prompt-submit.sh"}
 	installed := 0
+	sourceFound := 0
 	for _, hookFile := range hookFiles {
 		destPath := filepath.Join(mioHooksDir, hookFile)
 
 		// Primary: embedded assets
 		if err := InstallEmbeddedFile("hooks/"+hookFile, destPath, 0755); err == nil {
+			sourceFound++
 			installed++
 			continue
 		}
@@ -553,6 +555,7 @@ func (c *ClaudeCode) installHooks(binPath, dir string) error {
 		if err != nil {
 			continue
 		}
+		sourceFound++
 
 		if existing, err := os.ReadFile(destPath); err == nil && string(existing) == string(srcData) {
 			continue
@@ -564,7 +567,9 @@ func (c *ClaudeCode) installHooks(binPath, dir string) error {
 		installed++
 	}
 
-	if installed > 0 {
+	if sourceFound == 0 {
+		PrintStep("warn", "No hook sources found")
+	} else if installed > 0 {
 		PrintStep("ok", fmt.Sprintf("Installed %d hook scripts → %s", installed, mioHooksDir))
 	} else {
 		PrintStep("ok", "Hooks already up to date")

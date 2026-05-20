@@ -10,6 +10,8 @@ metadata:
 
 ## Purpose
 
+This skill is an **alternative entry point** that replaces the architect's dispatch loop for medium changes. It is NOT a sub-agent of the architect — do NOT wrap it in a nested Agent call from the architect.
+
 Fast-forward through SDD planning phases (explore → propose → spec → design → tasks) without pausing for user approval between each phase. Stops at sdd-apply so the user can review tasks before implementation begins.
 
 ## When to Use

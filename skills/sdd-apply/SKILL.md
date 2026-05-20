@@ -82,9 +82,17 @@ Change `- [ ]` to `- [x]` as you go.
 
 ### 5. Persist Progress (MANDATORY)
 
-Update tasks artifact:
+After completing EACH task (or hitting a blocker), save progress immediately. Do not batch saves to the end of the loop.
+
+Update tasks artifact (uses topic_key for upsert):
 ```
-mcp__mio__mem_update(id: {tasks-observation-id}, title: "sdd/{change-name}/tasks", content: "{updated tasks with [x]}")
+mcp__mio__mem_save(
+  title: "sdd/{change-name}/tasks",
+  topic_key: "sdd/{change-name}/tasks",
+  type: "architecture",
+  project: "{project}",
+  content: "{updated tasks with [x]}"
+)
 ```
 
 Save progress report:

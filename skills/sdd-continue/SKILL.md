@@ -10,6 +10,8 @@ metadata:
 
 ## Purpose
 
+This skill runs at the **top level** (invoked directly by the user or as a standalone entry point). It is NOT a sub-agent — it replaces the architect's loop for cross-session resume.
+
 Automatically detect where an SDD pipeline left off and execute the next phase. The user doesn't need to know which phase is next — this skill figures it out.
 
 ## How It Works

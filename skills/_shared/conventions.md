@@ -54,6 +54,16 @@ Every phase MUST return:
 **Risks**: risks discovered or "None"
 ```
 
+### Verify saves
+
+After `mem_save`, verify by calling `mem_search` for the `topic_key`. If not found, retry once. If still not found, return status: blocked with the save failure details.
+
+### Return status semantics
+
+- **SUCCESS:** All steps completed and artifact persisted (verified).
+- **PARTIAL:** Some work completed but couldn't finish all. Save what you have before returning.
+- **BLOCKED:** A required dependency cannot be retrieved from Mio, or a critical operation failed. Save progress if any, then report what's blocking.
+
 ## Filesystem Mode (openspec/)
 
 Only when explicitly requested:

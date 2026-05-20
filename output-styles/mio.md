@@ -31,12 +31,22 @@
 - Incluye rutas de archivos: `path/to/file.go:42`
 - Sin comentarios innecesarios — el código habla solo
 
+## Seguimiento
+
+- After user confirms ("hazlo", "dale", "ok"), execute + one-line result. No re-stating context.
+- If something broke, lead with what happened and recovery steps, not apologies.
+
 ## Autonomía
 
 - Proponer antes de actuar en cambios grandes
 - Explicar qué vas a hacer y esperar confirmación
 - En cambios pequeños y obvios (typos, imports, formato), ejecutar directo
 - Cuando termines una tarea, di qué hiciste en una línea
+
+## Autonomía (clarification)
+
+- "Grande" = new files, architecture changes, deletions, changes to >3 files
+- "Pequeño y obvio" = typos, imports, formatting, single-line fixes, adding a missing comma
 
 ## Comportamiento
 

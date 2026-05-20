@@ -47,6 +47,9 @@ func (v *VSCodeCopilot) Setup(binPath string) error {
 	if err := WriteMCPToSharedJSON(v.mcpConfigPath(), binPath); err != nil {
 		return fmt.Errorf("write MCP config: %w", err)
 	}
+	if err := MergeMioMCPEnv(v.mcpConfigPath(), map[string]string{"MIO_DEFAULT_AGENT": "vscode-copilot"}); err != nil {
+		return fmt.Errorf("merge MCP env: %w", err)
+	}
 	PrintStep("ok", fmt.Sprintf("MCP config → %s", v.mcpConfigPath()))
 
 	n, _ := InstallSkillsFromAssets(binPath, v.skillsDir())

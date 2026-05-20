@@ -50,6 +50,9 @@ func (k *KiloCode) Setup(binPath string) error {
 	if err := WriteMCPToSharedJSON(k.mcpConfigPath(), binPath); err != nil {
 		return fmt.Errorf("write MCP config: %w", err)
 	}
+	if err := MergeMioMCPEnv(k.mcpConfigPath(), map[string]string{"MIO_DEFAULT_AGENT": "kilo-code"}); err != nil {
+		return fmt.Errorf("merge MCP env: %w", err)
+	}
 	PrintStep("ok", fmt.Sprintf("MCP config → %s", k.mcpConfigPath()))
 
 	// 2. Skills

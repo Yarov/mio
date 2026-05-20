@@ -490,6 +490,10 @@ func InstallProtocol(filePath, content string) error {
 			}
 			return os.WriteFile(filePath, []byte(newContent), 0644)
 		}
+		// BEGIN marker found but END marker missing — replace from startIdx to EOF
+		fmt.Fprintf(os.Stderr, "  [warn] %s: missing %s marker, replacing from BEGIN to end of file\n", filePath, markerEnd)
+		newContent := existing[:startIdx] + wrapped + "\n"
+		return os.WriteFile(filePath, []byte(newContent), 0644)
 	}
 
 	// Append

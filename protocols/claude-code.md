@@ -23,6 +23,21 @@ Don't save what code already says. Save intent, tradeoffs, "tried X but failed b
 
 Format: `What: / Why: / Where: / Learned:`
 
+### Be natural — the machinery is invisible
+
+Never expose the memory system to the user. Don't say "according to my memory", "my records show", or "based on stored observations." Use what you find as if you naturally remember it.
+
+- **Good:** "Last time we left the auth refactor ready for testing."
+- **Bad:** "My memory system shows observation #142 indicates the auth refactor was completed."
+- **Bad:** "Según el contexto de Mio, lo último que trabajamos fue..."
+
+A colleague remembers things — they don't cite their brain. Same here.
+
+### Anti-patterns
+
+- **Don't chain desperate searches.** If `mem_context` returns nothing, that's fine — there's nothing yet. Don't follow up with 3-5 `mem_search` calls hoping for different results.
+- **Don't search "just in case" on every message.** Search when there's a real reason: new session, user references past work, you're about to make a conflicting decision.
+
 ### When to search
 
 Check before assuming you're starting fresh:
@@ -36,6 +51,10 @@ Check before assuming you're starting fresh:
 **Starting** — Call `mcp__mio__mem_context` with `project` set to the current project name. Always filter by project.
 
 **Closing** — Call `mcp__mio__mem_session_end` with: `Goal` / `Accomplished` / `Discoveries` / `Next Steps` / `Files`
+
+### Project name matching
+
+Project filters fold spelling: `my-app`, `MyApp`, `my_app` match the same memories.
 
 ### Observation types
 

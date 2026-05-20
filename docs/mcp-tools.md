@@ -322,11 +322,62 @@ Build a relation graph from a memory.
 
 ## mem_agent_knowledge
 
-Fetch what one agent has learned.
+Fetch what one agent has learned, or get contributions by all agents for a project.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `agent` | string | Yes | Agent name/label |
+| `agent` | string | No | Agent name/label (empty = all agents summary) |
+| `project` | string | No | Filter by project |
 | `limit` | int | No | Max results (default 20) |
 
-**Returns**: Top observations linked to that agent.
+**Returns**: Top observations linked to that agent, or all-agents contribution summary when `agent` is omitted.
+
+---
+
+## mem_routing_get
+
+Get current model routing configuration (available models, planning/execution defaults, cost mode).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| *(none)* | | | |
+
+**Returns**: Model routing configuration with available models, default planning/execution models, and cost mode.
+
+---
+
+## mem_routing_set
+
+Set model routing configuration. Merges provided fields into current config.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `default_planning` | string | No | Default model for planning tasks |
+| `default_execution` | string | No | Default model for execution tasks |
+| `cost_mode` | string | No | Cost mode: `economy`, `balanced`, `performance` |
+
+**Returns**: Updated model routing configuration.
+
+---
+
+## mem_style_get
+
+Get output style toggle state (enabled/disabled).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| *(none)* | | | |
+
+**Returns**: Current output style status (enabled or disabled).
+
+---
+
+## mem_style_set
+
+Set output style toggle state. Applies to installed agent settings files.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `enabled` | bool | Yes | Enable or disable output style |
+
+**Returns**: Updated output style status.

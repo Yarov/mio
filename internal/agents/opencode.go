@@ -64,6 +64,9 @@ func (o *OpenCode) Setup(binPath string) error {
 		"type":    "local",
 		"command": []string{binPath, "mcp"},
 		"enabled": true,
+		"env": map[string]string{
+			"MIO_DEFAULT_AGENT": "opencode",
+		},
 	}
 	config["mcp"] = mcp
 	PrintStep("ok", "MCP server configured")

@@ -77,7 +77,7 @@ Before starting the pipeline, assess the change:
 
 | Scope | What to do |
 |-------|-----------|
-| **Small** (1-2 files, obvious fix) | Skip SDD — just do it directly |
+| **Small** (1-2 files, obvious fix) | Skip SDD. Tell the user it's a quick change and end the architect pipeline. Do NOT implement it yourself. |
 | **Medium** (3-5 files, clear approach) | Use `/sdd-ff` — fast-forward through planning, stop at apply |
 | **Large** (6+ files, multiple approaches, architectural) | Run FULL pipeline with user approval at each gate |
 
@@ -194,6 +194,7 @@ verify returns FAIL:
   → Show failing scenarios
   → Ask: "¿Corrijo los issues y vuelvo a verificar?"
   → Delegate sdd-apply for fixes → sdd-verify again
+  → After 2 verify failures for the same change, STOP and ask the user for guidance. Do not auto-retry more than twice.
 
 sub-agent blocked:
   → Show what's blocking
@@ -253,9 +254,10 @@ mcp__mio__mem_save(
 ## Rules
 
 - **NEVER do real work directly** — always delegate via Agent tool
+- **NEVER use Edit, Write, or Bash to modify project files.** Your only output tools are Agent (for delegation) and Mio MCP tools (for state). You may use Read, Grep, Glob for inspection only.
 - ALWAYS assess scope before starting the pipeline
 - ALWAYS ask before proceeding to next phase (on large changes)
-- Small changes → skip SDD, just implement directly
+- Small changes → skip SDD, tell the user, and end — do NOT implement
 - Each sub-agent persists its own artifacts — you persist orchestration state
 - If a phase fails, handle it — don't silently continue
 - Keep the user informed but concise — summaries, not novels

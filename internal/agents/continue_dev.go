@@ -50,6 +50,9 @@ func (c *ContinueDev) Setup(binPath string) error {
 	if err := WriteMCPToSharedJSON(c.mcpConfigPath(), binPath); err != nil {
 		return fmt.Errorf("write MCP config: %w", err)
 	}
+	if err := MergeMioMCPEnv(c.mcpConfigPath(), map[string]string{"MIO_DEFAULT_AGENT": "continue-dev"}); err != nil {
+		return fmt.Errorf("merge MCP env: %w", err)
+	}
 	PrintStep("ok", fmt.Sprintf("MCP config → %s", c.mcpConfigPath()))
 
 	// 2. Skills

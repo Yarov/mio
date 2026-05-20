@@ -1,45 +1,39 @@
-## Mio — Persistent Memory Protocol
+## Mio — Your memory across sessions
 
-Mio is an MCP server that gives you persistent memory across sessions. Follow this protocol.
+You have no memory between conversations. When this one ends, everything vanishes. The only bridge is what you save to Mio.
 
-### PROACTIVE SAVE
+**Not saving is forgetting.**
 
-Call the `mio.mem_save` tool IMMEDIATELY after ANY of these:
+### What to save
 
-- Architecture or design decision made
-- Convention documented or established
-- Bug fix completed (include root cause)
-- Feature implemented with non-obvious approach
-- Non-obvious discovery about the codebase
-- Gotcha, edge case, or unexpected behavior found
-- User preference or constraint learned
+Save what the code doesn't say — decisions (and why), discoveries, user preferences, progress, surprises.
 
-**Self-check after EVERY task:**
-> "Did I just make a decision, fix a bug, or learn something non-obvious? If yes, call mem_save NOW."
+Structure: `What: / Why: / Where: / Learned:`
 
-### SEARCH MEMORY
+### When to save — recognize these moments
 
-Call `mio.mem_search` or `mio.mem_context` when:
-- Starting work on something that might have been done before
-- User asks to recall anything ("remember", "what did we do")
-- User's FIRST message references a project or feature
+**The user is leaving.** "me voy", "bye", "regreso", "luego sigo" — save a summary before responding. This is the most common failure: not saving when the conversation ends.
 
-### SESSION LIFECYCLE
+**You discovered something.** A root cause, unexpected behavior, workaround — save now, not later. Conversations end without warning.
 
-- **Start**: Call `mio.mem_context` with `project` set to the current project name. Always filter by project — context requests mean *this* project, not all projects
-- **End**: Call `mio.mem_session_end` with summary (Goal, Accomplished, Discoveries, Next Steps, Files)
+**A decision was made.** Save what you chose AND what you rejected and why.
 
-### Memory format
+**The user shared a preference.** Save it. People don't like repeating themselves.
 
-```
-What: [what was done]
-Why: [motivation/context]
-Where: [files/modules affected]
-Learned: [key takeaway]
-```
+**You've been working a while without saving.** Meaningful progress with no saves = risk.
 
-### Types: `bugfix`, `decision`, `architecture`, `discovery`, `pattern`, `config`, `preference`, `learning`, `summary`
+### When to search
 
-### Topic keys: Use `topic_key` for evolving topics so updates replace instead of duplicating.
+Call `mio.mem_context` with the project name at session start. Search when the user references past work or you're about to make a decision that could conflict with a prior one.
 
-### Relations: Use `mio.mem_relate` with "supersedes" or "caused_by" to link related memories.
+### Types
+
+`bugfix`, `decision`, `architecture`, `discovery`, `pattern`, `config`, `preference`, `learning`, `summary`
+
+### Topic keys
+
+Use `topic_key` for evolving topics so updates replace instead of duplicating.
+
+### Relations
+
+Use `mio.mem_relate` with `supersedes` or `caused_by` to link related memories.

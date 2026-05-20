@@ -49,6 +49,9 @@ func (c *CodexCLI) Setup(binPath string) error {
 	if err := WriteMCPToSharedJSON(c.mcpConfigPath(), binPath); err != nil {
 		return fmt.Errorf("write MCP config: %w", err)
 	}
+	if err := MergeMioMCPEnv(c.mcpConfigPath(), map[string]string{"MIO_DEFAULT_AGENT": "codex-cli"}); err != nil {
+		return fmt.Errorf("merge MCP env: %w", err)
+	}
 	PrintStep("ok", fmt.Sprintf("MCP config → %s", c.mcpConfigPath()))
 
 	n, _ := InstallSkillsFromAssets(binPath, c.skillsDir())
