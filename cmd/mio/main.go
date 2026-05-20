@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -239,7 +240,9 @@ func ensureDashboard(cfg *config.Config) {
 	}
 
 	cmd := exec.Command(binPath, "server", strconv.Itoa(cfg.HTTPPort))
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // detach from parent session
+	if runtime.GOOS != "windows" {
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // detach from parent session (Unix only)
+	}
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	cmd.Stdin = nil
