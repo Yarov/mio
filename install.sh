@@ -108,9 +108,13 @@ main() {
 
   # Find the binary (tar extracts to a subdirectory)
   info "Looking for binary..."
-  find "$TMPDIR" -type f -name "$BINARY" 2>/dev/null || true
-  BINARY_PATH=$(find "$TMPDIR" -type f -name "$BINARY" 2>/dev/null | head -1)
-  if [ -z "$BINARY_PATH" ]; then
+  BINARY_PATH="$TMPDIR/mio"
+  if [ ! -f "$BINARY_PATH" ]; then
+    BINARY_PATH=$(find "$TMPDIR" -name "$BINARY" -type f 2>/dev/null | head -1)
+  fi
+  if [ -z "$BINARY_PATH" ] || [ ! -f "$BINARY_PATH" ]; then
+    info "TMPDIR contents:"
+    ls -laR "$TMPDIR" 2>/dev/null || true
     error "Could not find $BINARY in extracted files"
   fi
   info "Found binary at: $BINARY_PATH"
